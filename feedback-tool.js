@@ -26,57 +26,43 @@
     const panel = document.createElement('div');
     panel.className = 'feedback-tool-panel';
     panel.innerHTML = `
-      <h3>📝 修正指示ツール</h3>
-      <button class="feedback-tool-btn feedback-tool-btn-primary" id="toggleAddingMode">
-        🖱️ 範囲指定モード開始
-      </button>
-      <div style="margin: 10px 0; padding: 10px; border: 2px dashed #ddd; border-radius: 4px; text-align: center; background: #f8f9fa; cursor: pointer;" id="importArea">
-        <div style="font-size: 13px; color: #666;">📁 ファイルをドロップ</div>
-        <div style="font-size: 11px; color: #999; margin-top: 4px;">または クリックして選択</div>
-        <input type="file" id="fileInput" accept=".json" style="display: none;">
+      <div class="feedback-panel-toggle" id="panelToggle">
+        <span>📝</span>
       </div>
-      <button class="feedback-tool-btn feedback-tool-btn-success" id="exportData" disabled>
-        📥 データ出力 <span class="feedback-count">0</span>
-      </button>
-      <button class="feedback-tool-btn feedback-tool-btn-danger" id="clearAll" disabled>
-        🗑️ すべてクリア
-      </button>
-      <div class="feedback-list" id="feedbackList"></div>
-      <button class="feedback-tool-btn" id="closePanel" style="background: #6c757d; color: white; margin-top: 10px;">
-        ✕ 閉じる
-      </button>
+      <div class="feedback-panel-content">
+        <h3>📝 修正指示ツール</h3>
+        <button class="feedback-tool-btn feedback-tool-btn-primary" id="toggleAddingMode">
+          🖱️ 範囲指定モード開始
+        </button>
+        <div style="margin: 10px 0; padding: 10px; border: 2px dashed #ddd; border-radius: 4px; text-align: center; background: #f8f9fa; cursor: pointer;" id="importArea">
+          <div style="font-size: 13px; color: #666;">📁 ファイルをドロップ</div>
+          <div style="font-size: 11px; color: #999; margin-top: 4px;">または クリックして選択</div>
+          <input type="file" id="fileInput" accept=".json" style="display: none;">
+        </div>
+        <button class="feedback-tool-btn feedback-tool-btn-success" id="exportData" disabled>
+          📥 データ出力 <span class="feedback-count">0</span>
+        </button>
+        <button class="feedback-tool-btn feedback-tool-btn-danger" id="clearAll" disabled>
+          🗑️ すべてクリア
+        </button>
+        <div class="feedback-list" id="feedbackList"></div>
+        <button class="feedback-tool-btn" id="closePanel" style="background: #6c757d; color: white; margin-top: 10px;">
+          ✕ 閉じる
+        </button>
+      </div>
     `;
     document.body.appendChild(panel);
 
-    // パネルのドラッグ機能
-    let isPanelDragging = false;
-    let panelCurrentX, panelCurrentY, panelInitialX, panelInitialY;
-
-    panel.querySelector('h3').addEventListener('mousedown', panelDragStart);
-
-    function panelDragStart(e) {
-      panelInitialX = e.clientX - panel.offsetLeft;
-      panelInitialY = e.clientY - panel.offsetTop;
-      isPanelDragging = true;
-    }
-
-    document.addEventListener('mousemove', panelDrag);
-    document.addEventListener('mouseup', panelDragEnd);
-
-    function panelDrag(e) {
-      if (isPanelDragging) {
-        e.preventDefault();
-        panelCurrentX = e.clientX - panelInitialX;
-        panelCurrentY = e.clientY - panelInitialY;
-        panel.style.left = panelCurrentX + 'px';
-        panel.style.top = panelCurrentY + 'px';
-        panel.style.right = 'auto';
+    // パネルの開閉
+    let isPanelOpen = true;
+    document.getElementById('panelToggle').addEventListener('click', () => {
+      isPanelOpen = !isPanelOpen;
+      if (isPanelOpen) {
+        panel.classList.remove('closed');
+      } else {
+        panel.classList.add('closed');
       }
-    }
-
-    function panelDragEnd() {
-      isPanelDragging = false;
-    }
+    });
 
     updateFeedbackList();
 
@@ -572,16 +558,46 @@
     style.textContent = `
       .feedback-tool-panel {
         position: fixed;
-        top: 20px;
-        right: 20px;
+        top: 0;
+        right: 0;
+        height: 100vh;
         background: white;
-        border: 2px solid #333;
-        border-radius: 8px;
-        padding: 15px;
+        border-left: 2px solid #333;
         z-index: 999999;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        box-shadow: -4px 0 12px rgba(0,0,0,0.3);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        min-width: 280px;
+        width: 320px;
+        display: flex;
+        transition: transform 0.3s ease;
+      }
+      .feedback-tool-panel.closed {
+        transform: translateX(320px);
+      }
+      .feedback-panel-toggle {
+        position: absolute;
+        left: -40px;
+        top: 20px;
+        width: 40px;
+        height: 40px;
+        background: #007bff;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        border-radius: 8px 0 0 8px;
+        box-shadow: -2px 2px 8px rgba(0,0,0,0.2);
+        font-size: 20px;
+        transition: background 0.2s;
+      }
+      .feedback-panel-toggle:hover {
+        background: #0056b3;
+      }
+      .feedback-panel-content {
+        width: 100%;
+        padding: 20px;
+        overflow-y: auto;
+        box-sizing: border-box;
       }
       .feedback-tool-panel h3 {
         margin: 0 0 15px 0;
@@ -589,7 +605,6 @@
         color: #333;
         border-bottom: 2px solid #007bff;
         padding-bottom: 8px;
-        cursor: move;
       }
       .feedback-tool-btn {
         display: block;
