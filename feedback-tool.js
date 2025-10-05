@@ -1,16 +1,6 @@
 (function() {
   'use strict';
 
-  // URLパラメータから共有データを確認
-  const urlParams = new URLSearchParams(window.location.search);
-  const sharedData = urlParams.get('feedback');
-  
-  if (sharedData) {
-    // 共有モードで起動
-    loadSharedFeedback(sharedData);
-    return;
-  }
-
   if (window.feedbackToolLoaded) {
     alert('修正指示ツールは既に起動しています');
     return;
@@ -19,135 +9,15 @@
 
   initFeedbackTool();
 
-  function loadSharedFeedback(encodedData) {
-    try {
-      // LZ-String で解凍
-      const jsonData = LZString.decompressFromEncodedURIComponent(encodedData);
-      if (!jsonData) {
-        throw new Error('データの解凍に失敗しました');
-      }
-      const feedbacks = JSON.parse(jsonData);
-      
-      // スタイルを追加
-      addStyles();
-      
-      // 共有モード用パネルを作成
-      const panel = document.createElement('div');
-      panel.className = 'feedback-tool-panel';
-      panel.innerHTML = `
-        <h3>📋 修正指示 (閲覧モード)</h3>
-        <div style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 13px;">
-          <strong>${feedbacks.length}件</strong>の指示があります
-        </div>
-        <div class="feedback-list" id="feedbackList"></div>
-        <button class="feedback-tool-btn" id="closePanel" style="background: #6c757d; color: white; margin-top: 10px;">
-          ✕ 閉じる
-        </button>
-      `;
-      document.body.appendChild(panel);
-      
-      // 矩形とラベルを表示
-      feedbacks.forEach(fb => {
-        const rect = document.createElement('div');
-        rect.className = 'feedback-rect';
-        rect.style.left = fb.rect.left + 'px';
-        rect.style.top = fb.rect.top + 'px';
-        rect.style.width = fb.rect.width + 'px';
-        rect.style.height = fb.rect.height + 'px';
-        rect.style.pointerEvents = 'auto';
-        
-        const label = document.createElement('div');
-        label.className = 'feedback-rect-label';
-        label.textContent = fb.number;
-        rect.appendChild(label);
-        
-        document.body.appendChild(rect);
-        
-        // クリックで詳細表示
-        label.addEventListener('click', () => {
-          showSharedBalloon(fb);
-        });
-      });
-      
-      // リスト表示
-      const list = document.getElementById('feedbackList');
-      list.innerHTML = feedbacks.map(fb => `
-        <div class="feedback-list-item" style="cursor: pointer;" data-number="${fb.number}">
-          <strong>No.${fb.number}</strong> [${fb.priority}] ${fb.category}<br>
-          <small>${fb.comment.substring(0, 30)}${fb.comment.length > 30 ? '...' : ''}</small>
-        </div>
-      `).join('');
-      
-      // リストアイテムクリックで詳細表示
-      document.querySelectorAll('.feedback-list-item').forEach(item => {
-        item.addEventListener('click', () => {
-          const number = parseInt(item.dataset.number);
-          const fb = feedbacks.find(f => f.number === number);
-          if (fb) {
-            showSharedBalloon(fb);
-            // 矩形までスクロール
-            const rect = document.querySelector(`.feedback-rect [data-number="${number}"]`)?.parentElement;
-            if (rect) {
-              rect.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          }
-        });
-      });
-      
-      document.getElementById('closePanel').addEventListener('click', () => {
-        panel.remove();
-        document.querySelectorAll('.feedback-rect, .feedback-balloon').forEach(el => el.remove());
-      });
-      
-    } catch (error) {
-      console.error('共有データの読み込みに失敗:', error);
-      alert('共有URLが無効です');
-    }
-  }
-
-  function showSharedBalloon(fb) {
-    // 既存の吹き出しを削除
-    const existing = document.querySelector('.feedback-balloon');
-    if (existing) existing.remove();
-    
-    const balloon = document.createElement('div');
-    balloon.className = 'feedback-balloon';
-    balloon.style.left = (fb.rect.left + fb.rect.width + 20) + 'px';
-    balloon.style.top = fb.rect.top + 'px';
-    
-    balloon.innerHTML = `
-      <h4>📝 指示 No.${fb.number}</h4>
-      <div class="feedback-balloon-group">
-        <label>指示内容</label>
-        <div style="padding: 8px; background: #f8f9fa; border-radius: 4px; white-space: pre-wrap;">${fb.comment}</div>
-      </div>
-      <div class="feedback-balloon-group">
-        <label>優先度</label>
-        <div style="padding: 8px; background: #f8f9fa; border-radius: 4px;"><strong>${fb.priority}</strong></div>
-      </div>
-      <div class="feedback-balloon-group">
-        <label>カテゴリ</label>
-        <div style="padding: 8px; background: #f8f9fa; border-radius: 4px;">${fb.category}</div>
-      </div>
-      <div style="font-size: 11px; color: #999; margin-top: 8px;">作成: ${fb.timestamp}</div>
-      <div class="feedback-balloon-buttons">
-        <button id="balloonClose" style="background: #6c757d; color: white; width: 100%;">閉じる</button>
-      </div>
-    `;
-    
-    document.body.appendChild(balloon);
-    
-    document.getElementById('balloonClose').addEventListener('click', () => {
-      balloon.remove();
-    });
-  }
-
   function initFeedbackTool() {
     const feedbacks = [];
     let isAddingMode = false;
     let isDragging = false;
-    let startX, startY, currentRect;
+    let isResizing = false;
+    let isMoving = false;
+    let startX, startY, currentRect, currentFeedback;
     let rectCounter = 0;
+    let resizeHandle = '';
 
     // スタイルを追加
     addStyles();
@@ -160,10 +30,15 @@
       <button class="feedback-tool-btn feedback-tool-btn-primary" id="toggleAddingMode">
         🖱️ 範囲指定モード開始
       </button>
-      <button class="feedback-tool-btn feedback-tool-btn-success" id="shareUrl" ${feedbacks.length === 0 ? 'disabled' : ''}>
-        📤 共有URL生成 <span class="feedback-count">${feedbacks.length}</span>
+      <div style="margin: 10px 0; padding: 10px; border: 2px dashed #ddd; border-radius: 4px; text-align: center; background: #f8f9fa; cursor: pointer;" id="importArea">
+        <div style="font-size: 13px; color: #666;">📁 ファイルをドロップ</div>
+        <div style="font-size: 11px; color: #999; margin-top: 4px;">または クリックして選択</div>
+        <input type="file" id="fileInput" accept=".json" style="display: none;">
+      </div>
+      <button class="feedback-tool-btn feedback-tool-btn-success" id="exportData" disabled>
+        📥 データ出力 <span class="feedback-count">0</span>
       </button>
-      <button class="feedback-tool-btn feedback-tool-btn-danger" id="clearAll" ${feedbacks.length === 0 ? 'disabled' : ''}>
+      <button class="feedback-tool-btn feedback-tool-btn-danger" id="clearAll" disabled>
         🗑️ すべてクリア
       </button>
       <div class="feedback-list" id="feedbackList"></div>
@@ -220,7 +95,62 @@
       }
     });
 
-    document.getElementById('shareUrl').addEventListener('click', generateShareUrl);
+    // インポート/エクスポート
+    const importArea = document.getElementById('importArea');
+    const fileInput = document.getElementById('fileInput');
+
+    importArea.addEventListener('click', () => fileInput.click());
+    
+    importArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      importArea.style.background = '#e3f2fd';
+    });
+    
+    importArea.addEventListener('dragleave', () => {
+      importArea.style.background = '#f8f9fa';
+    });
+    
+    importArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      importArea.style.background = '#f8f9fa';
+      const file = e.dataTransfer.files[0];
+      if (file) loadFile(file);
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) loadFile(file);
+    });
+
+    function loadFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = JSON.parse(e.target.result);
+          
+          // 既存の矩形とデータをクリア
+          feedbacks.length = 0;
+          document.querySelectorAll('.feedback-rect').forEach(el => el.remove());
+          
+          // データを読み込み
+          data.forEach(fb => {
+            feedbacks.push(fb);
+            createRect(fb);
+          });
+          
+          rectCounter = Math.max(...feedbacks.map(f => f.number), 0);
+          updateFeedbackList();
+          updateButtons();
+          alert(`${feedbacks.length}件の指示を読み込みました`);
+        } catch (error) {
+          alert('ファイルの読み込みに失敗しました');
+          console.error(error);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    document.getElementById('exportData').addEventListener('click', exportData);
     document.getElementById('clearAll').addEventListener('click', clearAll);
     document.getElementById('closePanel').addEventListener('click', () => {
       if (confirm('修正指示ツールを終了しますか?')) {
@@ -236,6 +166,35 @@
     document.addEventListener('mouseup', handleMouseUp, true);
 
     function handleMouseDown(e) {
+      // リサイズハンドルをクリックした場合
+      if (e.target.classList.contains('feedback-resize-handle')) {
+        e.preventDefault();
+        e.stopPropagation();
+        isResizing = true;
+        resizeHandle = e.target.dataset.handle;
+        currentRect = e.target.closest('.feedback-rect');
+        const number = parseInt(currentRect.dataset.number);
+        currentFeedback = feedbacks.find(f => f.number === number);
+        startX = e.pageX;
+        startY = e.pageY;
+        return;
+      }
+
+      // 矩形本体をクリックした場合（移動）
+      if (e.target.classList.contains('feedback-rect') && !e.target.closest('.feedback-rect-label')) {
+        e.preventDefault();
+        e.stopPropagation();
+        isMoving = true;
+        currentRect = e.target;
+        const number = parseInt(currentRect.dataset.number);
+        currentFeedback = feedbacks.find(f => f.number === number);
+        startX = e.pageX - currentFeedback.rect.left;
+        startY = e.pageY - currentFeedback.rect.top;
+        currentRect.style.cursor = 'move';
+        return;
+      }
+
+      // 新規作成モード
       if (!isAddingMode || e.target.closest('.feedback-tool-panel') || e.target.closest('.feedback-balloon')) {
         return;
       }
@@ -257,6 +216,65 @@
     }
 
     function handleMouseMove(e) {
+      // リサイズ中
+      if (isResizing) {
+        e.preventDefault();
+        const deltaX = e.pageX - startX;
+        const deltaY = e.pageY - startY;
+        
+        const originalRect = currentFeedback.rect;
+        let newLeft = originalRect.left;
+        let newTop = originalRect.top;
+        let newWidth = originalRect.width;
+        let newHeight = originalRect.height;
+
+        if (resizeHandle.includes('e')) {
+          newWidth = originalRect.width + deltaX;
+        }
+        if (resizeHandle.includes('w')) {
+          newWidth = originalRect.width - deltaX;
+          newLeft = originalRect.left + deltaX;
+        }
+        if (resizeHandle.includes('s')) {
+          newHeight = originalRect.height + deltaY;
+        }
+        if (resizeHandle.includes('n')) {
+          newHeight = originalRect.height - deltaY;
+          newTop = originalRect.top + deltaY;
+        }
+
+        if (newWidth > 20 && newHeight > 20) {
+          currentRect.style.left = newLeft + 'px';
+          currentRect.style.top = newTop + 'px';
+          currentRect.style.width = newWidth + 'px';
+          currentRect.style.height = newHeight + 'px';
+          
+          currentFeedback.rect.left = newLeft;
+          currentFeedback.rect.top = newTop;
+          currentFeedback.rect.width = newWidth;
+          currentFeedback.rect.height = newHeight;
+          
+          startX = e.pageX;
+          startY = e.pageY;
+        }
+        return;
+      }
+
+      // 移動中
+      if (isMoving) {
+        e.preventDefault();
+        const newLeft = e.pageX - startX;
+        const newTop = e.pageY - startY;
+        
+        currentRect.style.left = newLeft + 'px';
+        currentRect.style.top = newTop + 'px';
+        
+        currentFeedback.rect.left = newLeft;
+        currentFeedback.rect.top = newTop;
+        return;
+      }
+
+      // 新規作成中
       if (!isDragging) return;
       
       e.preventDefault();
@@ -276,6 +294,22 @@
     }
 
     function handleMouseUp(e) {
+      if (isResizing) {
+        isResizing = false;
+        resizeHandle = '';
+        currentRect = null;
+        currentFeedback = null;
+        return;
+      }
+
+      if (isMoving) {
+        isMoving = false;
+        currentRect.style.cursor = '';
+        currentRect = null;
+        currentFeedback = null;
+        return;
+      }
+
       if (!isDragging) return;
       
       e.preventDefault();
@@ -298,27 +332,56 @@
         height: parseInt(currentRect.style.height)
       };
       
-      // ラベルを追加
-      const label = document.createElement('div');
-      label.className = 'feedback-rect-label';
-      label.textContent = rectCounter;
-      label.dataset.number = rectCounter;
-      currentRect.appendChild(label);
-      currentRect.style.pointerEvents = 'auto';
-      currentRect.dataset.number = rectCounter;
+      // ラベルとリサイズハンドルを追加
+      setupRect(currentRect, rectCounter);
       
       // 吹き出しを表示
       showBalloon(rectData);
       
-      label.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const fb = feedbacks.find(f => f.number === rectCounter);
-        if (fb) {
-          showBalloon(rectData, fb);
-        }
+      currentRect = null;
+    }
+
+    function setupRect(rect, number) {
+      rect.dataset.number = number;
+      rect.style.pointerEvents = 'auto';
+      rect.style.cursor = 'move';
+      
+      // ラベル
+      const label = document.createElement('div');
+      label.className = 'feedback-rect-label';
+      label.textContent = number;
+      label.dataset.number = number;
+      rect.appendChild(label);
+      
+      // リサイズハンドル
+      const handles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+      handles.forEach(handle => {
+        const div = document.createElement('div');
+        div.className = 'feedback-resize-handle';
+        div.dataset.handle = handle;
+        div.style.cursor = handle + '-resize';
+        rect.appendChild(div);
       });
       
-      currentRect = null;
+      label.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const fb = feedbacks.find(f => f.number === number);
+        if (fb) {
+          showBalloon(fb.rect, fb);
+        }
+      });
+    }
+
+    function createRect(feedback) {
+      const rect = document.createElement('div');
+      rect.className = 'feedback-rect';
+      rect.style.left = feedback.rect.left + 'px';
+      rect.style.top = feedback.rect.top + 'px';
+      rect.style.width = feedback.rect.width + 'px';
+      rect.style.height = feedback.rect.height + 'px';
+      
+      setupRect(rect, feedback.number);
+      document.body.appendChild(rect);
     }
 
     function showBalloon(rectData, existingData = null) {
@@ -328,7 +391,27 @@
       
       const balloon = document.createElement('div');
       balloon.className = 'feedback-balloon';
-      balloon.style.left = (rectData.left + rectData.width + 20) + 'px';
+      
+      // 左右どちらに表示するか判定
+      const windowWidth = window.innerWidth;
+      const balloonWidth = 320;
+      const rightSpace = windowWidth - (rectData.left + rectData.width);
+      const leftSpace = rectData.left;
+      
+      if (rightSpace >= balloonWidth + 20) {
+        // 右側に表示
+        balloon.style.left = (rectData.left + rectData.width + 20) + 'px';
+        balloon.classList.add('balloon-right');
+      } else if (leftSpace >= balloonWidth + 20) {
+        // 左側に表示
+        balloon.style.left = (rectData.left - balloonWidth - 20) + 'px';
+        balloon.classList.add('balloon-left');
+      } else {
+        // どちらも無理なら右側
+        balloon.style.left = (rectData.left + rectData.width + 20) + 'px';
+        balloon.classList.add('balloon-right');
+      }
+      
       balloon.style.top = rectData.top + 'px';
       
       balloon.innerHTML = `
@@ -336,25 +419,6 @@
         <div class="feedback-balloon-group">
           <label>指示内容 *</label>
           <textarea id="balloonComment" placeholder="修正内容を入力">${existingData ? existingData.comment : ''}</textarea>
-        </div>
-        <div class="feedback-balloon-group">
-          <label>優先度</label>
-          <select id="balloonPriority">
-            <option value="高" ${existingData && existingData.priority === '高' ? 'selected' : ''}>高</option>
-            <option value="中" ${existingData && existingData.priority === '中' ? 'selected' : ''}>中</option>
-            <option value="低" ${existingData && existingData.priority === '低' ? 'selected' : ''}>低</option>
-          </select>
-        </div>
-        <div class="feedback-balloon-group">
-          <label>カテゴリ</label>
-          <select id="balloonCategory">
-            <option value="デザイン" ${existingData && existingData.category === 'デザイン' ? 'selected' : ''}>デザイン</option>
-            <option value="テキスト" ${existingData && existingData.category === 'テキスト' ? 'selected' : ''}>テキスト</option>
-            <option value="機能" ${existingData && existingData.category === '機能' ? 'selected' : ''}>機能</option>
-            <option value="レイアウト" ${existingData && existingData.category === 'レイアウト' ? 'selected' : ''}>レイアウト</option>
-            <option value="リンク" ${existingData && existingData.category === 'リンク' ? 'selected' : ''}>リンク</option>
-            <option value="その他" ${existingData && existingData.category === 'その他' ? 'selected' : ''}>その他</option>
-          </select>
         </div>
         <div class="feedback-balloon-buttons">
           ${existingData ? '<button id="balloonDelete" style="background: #dc3545; color: white;">削除</button>' : ''}
@@ -392,8 +456,6 @@
 
     function saveFeedback(rectData, existingData) {
       const comment = document.getElementById('balloonComment').value.trim();
-      const priority = document.getElementById('balloonPriority').value;
-      const category = document.getElementById('balloonCategory').value;
       
       if (!comment) {
         alert('指示内容を入力してください');
@@ -404,8 +466,6 @@
       const feedback = {
         number: rectData.number,
         comment,
-        priority,
-        category,
         rect: rectData,
         url: window.location.href,
         timestamp: new Date().toLocaleString('ja-JP')
@@ -441,17 +501,32 @@
         list.innerHTML = '<div style="padding: 15px; text-align: center; color: #999;">指示がありません</div>';
       } else {
         list.innerHTML = feedbacks.map(fb => `
-          <div class="feedback-list-item">
-            <strong>No.${fb.number}</strong> [${fb.priority}] ${fb.category}<br>
-            <small>${fb.comment.substring(0, 30)}${fb.comment.length > 30 ? '...' : ''}</small>
+          <div class="feedback-list-item" data-number="${fb.number}" style="cursor: pointer;">
+            <strong>No.${fb.number}</strong><br>
+            <small>${fb.comment.substring(0, 40)}${fb.comment.length > 40 ? '...' : ''}</small>
           </div>
         `).join('');
+        
+        // クリックでアンカー遷移
+        document.querySelectorAll('.feedback-list-item').forEach(item => {
+          item.addEventListener('click', () => {
+            const number = parseInt(item.dataset.number);
+            const rect = document.querySelector(`.feedback-rect[data-number="${number}"]`);
+            if (rect) {
+              rect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              rect.style.boxShadow = '0 0 20px rgba(220, 53, 69, 0.8)';
+              setTimeout(() => {
+                rect.style.boxShadow = '';
+              }, 1000);
+            }
+          });
+        });
       }
     }
 
     function updateButtons() {
       const hasData = feedbacks.length > 0;
-      document.getElementById('shareUrl').disabled = !hasData;
+      document.getElementById('exportData').disabled = !hasData;
       document.getElementById('clearAll').disabled = !hasData;
       
       const countBadge = document.querySelector('.feedback-count');
@@ -460,55 +535,22 @@
       }
     }
 
-    function generateShareUrl() {
+    function exportData() {
       if (feedbacks.length === 0) {
-        alert('共有する指示がありません');
+        alert('出力する指示がありません');
         return;
       }
 
-      try {
-        console.log('feedbacks:', feedbacks);
-        
-        // データをJSON化
-        const jsonData = JSON.stringify(feedbacks);
-        console.log('JSON化成功:', jsonData.length, '文字');
-        
-        // LZ-Stringで圧縮
-        const compressed = LZString.compressToEncodedURIComponent(jsonData);
-        console.log('圧縮成功:', compressed.length, '文字');
-        console.log('圧縮率:', Math.round((1 - compressed.length / jsonData.length) * 100) + '%削減');
-        
-        // 現在のURLに追加
-        const baseUrl = window.location.href.split('?')[0].split('#')[0];
-        const shareUrl = `${baseUrl}?feedback=${compressed}`;
-        
-        console.log('共有URL生成成功:', shareUrl.length, '文字');
-        
-        // URL長の警告
-        if (shareUrl.length > 2000) {
-          if (!confirm(`警告: URLが${shareUrl.length}文字と長いため、一部のブラウザで動作しない可能性があります。\n\n続行しますか?`)) {
-            return;
-          }
-        }
-        
-        // クリップボードにコピー
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(shareUrl).then(() => {
-            alert(`共有URLをクリップボードにコピーしました!\n\n指示件数: ${feedbacks.length}件\nURL長: ${shareUrl.length}文字\n圧縮率: ${Math.round((1 - compressed.length / jsonData.length) * 100)}%削減\n\nこのURLを共有すると、受け取った人は指示を確認できます。`);
-          }).catch((err) => {
-            console.error('クリップボードコピー失敗:', err);
-            prompt('以下のURLをコピーして共有してください:', shareUrl);
-          });
-        } else {
-          // クリップボードAPIが使えない場合
-          prompt('以下のURLをコピーして共有してください:', shareUrl);
-        }
-        
-      } catch (error) {
-        console.error('URL生成エラー詳細:', error);
-        console.error('エラースタック:', error.stack);
-        alert(`共有URL生成に失敗しました\n\nエラー: ${error.message}\n\nコンソールを確認してください`);
-      }
+      const dataStr = JSON.stringify(feedbacks, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `修正指示_${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      
+      alert(`${feedbacks.length}件の指示をファイルに出力しました`);
     }
 
     function clearAll() {
@@ -540,7 +582,6 @@
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         min-width: 280px;
-        cursor: move;
       }
       .feedback-tool-panel h3 {
         margin: 0 0 15px 0;
@@ -591,9 +632,9 @@
         position: absolute;
         border: 3px solid #dc3545;
         background: rgba(220, 53, 69, 0.1);
-        pointer-events: none;
         z-index: 999997;
         box-sizing: border-box;
+        transition: box-shadow 0.3s;
       }
       .feedback-rect-label {
         position: absolute;
@@ -607,24 +648,41 @@
         font-size: 14px;
         font-family: sans-serif;
         box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        pointer-events: auto;
         cursor: pointer;
+        pointer-events: auto;
       }
       .feedback-rect-label:hover {
         background: #c82333;
       }
+      .feedback-resize-handle {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: #dc3545;
+        border: 2px solid white;
+        box-shadow: 0 0 3px rgba(0,0,0,0.3);
+        pointer-events: auto;
+      }
+      .feedback-resize-handle[data-handle="nw"] { top: -5px; left: -5px; cursor: nw-resize; }
+      .feedback-resize-handle[data-handle="n"] { top: -5px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
+      .feedback-resize-handle[data-handle="ne"] { top: -5px; right: -5px; cursor: ne-resize; }
+      .feedback-resize-handle[data-handle="e"] { top: 50%; right: -5px; transform: translateY(-50%); cursor: e-resize; }
+      .feedback-resize-handle[data-handle="se"] { bottom: -5px; right: -5px; cursor: se-resize; }
+      .feedback-resize-handle[data-handle="s"] { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
+      .feedback-resize-handle[data-handle="sw"] { bottom: -5px; left: -5px; cursor: sw-resize; }
+      .feedback-resize-handle[data-handle="w"] { top: 50%; left: -5px; transform: translateY(-50%); cursor: w-resize; }
       .feedback-balloon {
         position: absolute;
         background: white;
         border: 2px solid #333;
         border-radius: 8px;
         padding: 15px;
-        min-width: 300px;
+        width: 300px;
         z-index: 999998;
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       }
-      .feedback-balloon::before {
+      .feedback-balloon.balloon-right::before {
         content: '';
         position: absolute;
         left: -10px;
@@ -635,7 +693,7 @@
         border-bottom: 10px solid transparent;
         border-right: 10px solid #333;
       }
-      .feedback-balloon::after {
+      .feedback-balloon.balloon-right::after {
         content: '';
         position: absolute;
         left: -7px;
@@ -645,6 +703,28 @@
         border-top: 8px solid transparent;
         border-bottom: 8px solid transparent;
         border-right: 8px solid white;
+      }
+      .feedback-balloon.balloon-left::before {
+        content: '';
+        position: absolute;
+        right: -10px;
+        top: 20px;
+        width: 0;
+        height: 0;
+        border-top: 10px solid transparent;
+        border-bottom: 10px solid transparent;
+        border-left: 10px solid #333;
+      }
+      .feedback-balloon.balloon-left::after {
+        content: '';
+        position: absolute;
+        right: -7px;
+        top: 22px;
+        width: 0;
+        height: 0;
+        border-top: 8px solid transparent;
+        border-bottom: 8px solid transparent;
+        border-left: 8px solid white;
       }
       .feedback-balloon h4 {
         margin: 0 0 12px 0;
@@ -661,8 +741,7 @@
         font-size: 13px;
         color: #555;
       }
-      .feedback-balloon-group textarea,
-      .feedback-balloon-group select {
+      .feedback-balloon-group textarea {
         width: 100%;
         padding: 6px;
         border: 1px solid #ddd;
@@ -670,8 +749,6 @@
         font-size: 13px;
         box-sizing: border-box;
         font-family: inherit;
-      }
-      .feedback-balloon-group textarea {
         min-height: 80px;
         resize: vertical;
       }
@@ -713,6 +790,10 @@
         padding: 8px;
         border-bottom: 1px solid #eee;
         font-size: 13px;
+        transition: background 0.2s;
+      }
+      .feedback-list-item:hover {
+        background: #f8f9fa;
       }
       .feedback-list-item:last-child {
         border-bottom: none;
