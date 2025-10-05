@@ -26,53 +26,59 @@
     const panel = document.createElement('div');
     panel.className = 'feedback-tool-panel';
     panel.innerHTML = `
-      <div class="feedback-panel-toggle" id="panelToggle">
-        <span>📝</span>
+      <h3>📝 修正指示ツール</h3>
+      <button class="feedback-tool-btn feedback-tool-btn-primary" id="toggleAddingMode">
+        🖱️ 範囲指定モード開始
+      </button>
+      <div style="margin: 10px 0; padding: 10px; border: 2px dashed #ddd; border-radius: 4px; text-align: center; background: #f8f9fa; cursor: pointer;" id="importArea">
+        <div style="font-size: 13px; color: #666;">📁 ファイルをドロップ</div>
+        <div style="font-size: 11px; color: #999; margin-top: 4px;">または クリックして選択</div>
+        <input type="file" id="fileInput" accept=".json" style="display: none;">
       </div>
-      <div class="feedback-panel-content">
-        <h3>📝 修正指示ツール</h3>
-        <button class="feedback-tool-btn feedback-tool-btn-primary" id="toggleAddingMode">
-          🖱️ 範囲指定モード開始
-        </button>
-        <div style="margin: 10px 0; padding: 10px; border: 2px dashed #ddd; border-radius: 4px; text-align: center; background: #f8f9fa; cursor: pointer;" id="importArea">
-          <div style="font-size: 13px; color: #666;">📁 ファイルをドロップ</div>
-          <div style="font-size: 11px; color: #999; margin-top: 4px;">または クリックして選択</div>
-          <input type="file" id="fileInput" accept=".json" style="display: none;">
-        </div>
-        <button class="feedback-tool-btn feedback-tool-btn-success" id="exportData" disabled>
-          📥 データ出力 <span class="feedback-count">0</span>
-        </button>
-        <button class="feedback-tool-btn feedback-tool-btn-danger" id="clearAll" disabled>
-          🗑️ すべてクリア
-        </button>
-        <div class="feedback-list" id="feedbackList"></div>
-        <button class="feedback-tool-btn" id="closePanel" style="background: #6c757d; color: white; margin-top: 10px;">
-          ✕ 閉じる
-        </button>
-      </div>
+      <button class="feedback-tool-btn feedback-tool-btn-success" id="exportData" disabled>
+        📥 データ出力 <span class="feedback-count">0</span>
+      </button>
+      <button class="feedback-tool-btn feedback-tool-btn-danger" id="clearAll" disabled>
+        🗑️ すべてクリア
+      </button>
+      <div class="feedback-list" id="feedbackList"></div>
+      <button class="feedback-tool-btn" id="closePanel" style="background: #6c757d; color: white; margin-top: 10px;">
+        ✕ 閉じる
+      </button>
     `;
     document.body.appendChild(panel);
 
-    // ページ全体を左にシフト
-    const originalBodyStyle = {
-      marginRight: document.body.style.marginRight,
-      transition: document.body.style.transition
-    };
-    document.body.style.transition = 'margin-right 0.3s ease';
-    document.body.style.marginRight = '320px';
+    // パネルのドラッグ機能
+    let isPanelDragging = false;
+    let panelCurrentX, panelCurrentY, panelInitialX, panelInitialY;
 
-    // パネルの開閉
-    let isPanelOpen = true;
-    document.getElementById('panelToggle').addEventListener('click', () => {
-      isPanelOpen = !isPanelOpen;
-      if (isPanelOpen) {
-        panel.classList.remove('closed');
-        document.body.style.marginRight = '320px';
-      } else {
-        panel.classList.add('closed');
-        document.body.style.marginRight = '0';
+    const panelHeader = panel.querySelector('h3');
+    panelHeader.addEventListener('mousedown', panelDragStart);
+
+    function panelDragStart(e) {
+      if (e.target !== panelHeader) return;
+      panelInitialX = e.clientX - panel.offsetLeft;
+      panelInitialY = e.clientY - panel.offsetTop;
+      isPanelDragging = true;
+    }
+
+    function panelDrag(e) {
+      if (isPanelDragging) {
+        e.preventDefault();
+        panelCurrentX = e.clientX - panelInitialX;
+        panelCurrentY = e.clientY - panelInitialY;
+        panel.style.left = panelCurrentX + 'px';
+        panel.style.top = panelCurrentY + 'px';
+        panel.style.right = 'auto';
       }
-    });
+    }
+
+    function panelDragEnd() {
+      isPanelDragging = false;
+    }
+
+    document.addEventListener('mousemove', panelDrag);
+    document.addEventListener('mouseup', panelDragEnd);
 
     updateFeedbackList();
 
@@ -128,26 +134,8 @@
           feedbacks.length = 0;
           document.querySelectorAll('.feedback-rect').forEach(el => el.remove());
           
-          // 新形式と旧形式の両方に対応
-          let feedbacksData;
-          if (data.feedbacks && Array.isArray(data.feedbacks)) {
-            // 新形式
-            feedbacksData = data.feedbacks;
-            
-            // サイズ差の警告
-            const currentWidth = document.body.scrollWidth;
-            const currentHeight = document.body.scrollHeight;
-            if (data.baseWidth && (Math.abs(currentWidth - data.baseWidth) > 100)) {
-              const sizeDiff = Math.round(((currentWidth - data.baseWidth) / data.baseWidth) * 100);
-              alert(`注意: このファイルは${data.baseWidth}x${data.baseHeight}pxで作成されました。\n現在の画面サイズ: ${currentWidth}x${currentHeight}px\n\n位置が${Math.abs(sizeDiff)}%程度ずれる可能性があります。`);
-            }
-          } else {
-            // 旧形式（配列のみ）
-            feedbacksData = data;
-          }
-          
           // データを読み込み
-          feedbacksData.forEach(fb => {
+          data.forEach(fb => {
             feedbacks.push(fb);
             createRect(fb);
           });
@@ -168,12 +156,25 @@
     document.getElementById('clearAll').addEventListener('click', clearAll);
     document.getElementById('closePanel').addEventListener('click', () => {
       if (confirm('修正指示ツールを終了しますか?')) {
-        // bodyのスタイルを元に戻す
-        document.body.style.marginRight = originalBodyStyle.marginRight;
-        document.body.style.transition = originalBodyStyle.transition;
+        // イベントリスナーを削除
+        document.removeEventListener('mousedown', handleMouseDown, true);
+        document.removeEventListener('mousemove', handleMouseMove, true);
+        document.removeEventListener('mouseup', handleMouseUp, true);
+        document.removeEventListener('mousemove', panelDrag);
+        document.removeEventListener('mouseup', panelDragEnd);
         
+        // すべての要素を削除
         panel.remove();
         document.querySelectorAll('.feedback-rect, .feedback-balloon').forEach(el => el.remove());
+        
+        // スタイルも削除
+        const styleEl = document.getElementById('feedback-tool-styles');
+        if (styleEl) styleEl.remove();
+        
+        // カーソルを元に戻す
+        document.body.style.cursor = '';
+        
+        // フラグをリセット
         window.feedbackToolLoaded = false;
       }
     });
@@ -391,34 +392,12 @@
     }
 
     function createRect(feedback) {
-      // 相対位置から絶対位置を計算
-      const bodyWidth = document.body.scrollWidth;
-      const bodyHeight = document.body.scrollHeight;
-      
-      let rectData;
-      if (feedback.relativeRect) {
-        // 相対位置がある場合は現在の画面サイズで再計算
-        rectData = {
-          number: feedback.number,
-          left: Math.round((feedback.relativeRect.leftPercent / 100) * bodyWidth),
-          top: Math.round((feedback.relativeRect.topPercent / 100) * bodyHeight),
-          width: Math.round((feedback.relativeRect.widthPercent / 100) * bodyWidth),
-          height: Math.round((feedback.relativeRect.heightPercent / 100) * bodyHeight)
-        };
-        
-        // feedbackオブジェクトのrectも更新
-        feedback.rect = rectData;
-      } else {
-        // 旧形式（絶対座標）の場合はそのまま使用
-        rectData = feedback.rect;
-      }
-      
       const rect = document.createElement('div');
       rect.className = 'feedback-rect';
-      rect.style.left = rectData.left + 'px';
-      rect.style.top = rectData.top + 'px';
-      rect.style.width = rectData.width + 'px';
-      rect.style.height = rectData.height + 'px';
+      rect.style.left = feedback.rect.left + 'px';
+      rect.style.top = feedback.rect.top + 'px';
+      rect.style.width = feedback.rect.width + 'px';
+      rect.style.height = feedback.rect.height + 'px';
       
       setupRect(rect, feedback.number);
       document.body.appendChild(rect);
@@ -503,29 +482,10 @@
         return;
       }
       
-      // 相対位置で保存（パーセンテージ）
-      const bodyWidth = document.body.scrollWidth;
-      const bodyHeight = document.body.scrollHeight;
-      
       const feedback = {
         number: rectData.number,
         comment,
-        rect: {
-          number: rectData.number,
-          left: rectData.left,
-          top: rectData.top,
-          width: rectData.width,
-          height: rectData.height
-        },
-        // 相対位置を追加保存
-        relativeRect: {
-          leftPercent: (rectData.left / bodyWidth) * 100,
-          topPercent: (rectData.top / bodyHeight) * 100,
-          widthPercent: (rectData.width / bodyWidth) * 100,
-          heightPercent: (rectData.height / bodyHeight) * 100
-        },
-        baseWidth: bodyWidth,
-        baseHeight: bodyHeight,
+        rect: rectData,
         url: window.location.href,
         timestamp: new Date().toLocaleString('ja-JP')
       };
@@ -600,16 +560,7 @@
         return;
       }
 
-      // 出力情報を追加
-      const exportData = {
-        version: '1.1',
-        createdAt: new Date().toISOString(),
-        baseWidth: document.body.scrollWidth,
-        baseHeight: document.body.scrollHeight,
-        feedbacks: feedbacks
-      };
-
-      const dataStr = JSON.stringify(exportData, null, 2);
+      const dataStr = JSON.stringify(feedbacks, null, 2);
       const blob = new Blob([dataStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -618,7 +569,7 @@
       link.click();
       URL.revokeObjectURL(url);
       
-      alert(`${feedbacks.length}件の指示をファイルに出力しました\n\n基準サイズ: ${exportData.baseWidth}x${exportData.baseHeight}px`);
+      alert(`${feedbacks.length}件の指示をファイルに出力しました`);
     }
 
     function clearAll() {
@@ -640,46 +591,16 @@
     style.textContent = `
       .feedback-tool-panel {
         position: fixed;
-        top: 0;
-        right: 0;
-        height: 100vh;
-        background: white;
-        border-left: 2px solid #333;
-        z-index: 999999;
-        box-shadow: -4px 0 12px rgba(0,0,0,0.3);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        width: 320px;
-        display: flex;
-        transition: transform 0.3s ease;
-      }
-      .feedback-tool-panel.closed {
-        transform: translateX(320px);
-      }
-      .feedback-panel-toggle {
-        position: absolute;
-        left: -40px;
         top: 20px;
-        width: 40px;
-        height: 40px;
-        background: #007bff;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        border-radius: 8px 0 0 8px;
-        box-shadow: -2px 2px 8px rgba(0,0,0,0.2);
-        font-size: 20px;
-        transition: background 0.2s;
-      }
-      .feedback-panel-toggle:hover {
-        background: #0056b3;
-      }
-      .feedback-panel-content {
-        width: 100%;
-        padding: 20px;
-        overflow-y: auto;
-        box-sizing: border-box;
+        right: 20px;
+        background: white;
+        border: 2px solid #333;
+        border-radius: 8px;
+        padding: 15px;
+        z-index: 999999;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        min-width: 280px;
       }
       .feedback-tool-panel h3 {
         margin: 0 0 15px 0;
@@ -687,6 +608,7 @@
         color: #333;
         border-bottom: 2px solid #007bff;
         padding-bottom: 8px;
+        cursor: move;
       }
       .feedback-tool-btn {
         display: block;
