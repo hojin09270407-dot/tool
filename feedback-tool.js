@@ -53,14 +53,24 @@
     `;
     document.body.appendChild(panel);
 
+    // ページ全体を左にシフト
+    const originalBodyStyle = {
+      marginRight: document.body.style.marginRight,
+      transition: document.body.style.transition
+    };
+    document.body.style.transition = 'margin-right 0.3s ease';
+    document.body.style.marginRight = '320px';
+
     // パネルの開閉
     let isPanelOpen = true;
     document.getElementById('panelToggle').addEventListener('click', () => {
       isPanelOpen = !isPanelOpen;
       if (isPanelOpen) {
         panel.classList.remove('closed');
+        document.body.style.marginRight = '320px';
       } else {
         panel.classList.add('closed');
+        document.body.style.marginRight = '0';
       }
     });
 
@@ -140,6 +150,10 @@
     document.getElementById('clearAll').addEventListener('click', clearAll);
     document.getElementById('closePanel').addEventListener('click', () => {
       if (confirm('修正指示ツールを終了しますか?')) {
+        // bodyのスタイルを元に戻す
+        document.body.style.marginRight = originalBodyStyle.marginRight;
+        document.body.style.transition = originalBodyStyle.transition;
+        
         panel.remove();
         document.querySelectorAll('.feedback-rect, .feedback-balloon').forEach(el => el.remove());
         window.feedbackToolLoaded = false;
