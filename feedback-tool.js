@@ -463,25 +463,38 @@
       }
 
       try {
+        console.log('feedbacks:', feedbacks);
+        
         // データをJSON化してBase64エンコード
         const jsonData = JSON.stringify(feedbacks);
-        const encodedData = encodeURIComponent(btoa(jsonData));
+        console.log('JSON化成功:', jsonData.length, '文字');
+        
+        const base64Data = btoa(unescape(encodeURIComponent(jsonData)));
+        console.log('Base64化成功:', base64Data.length, '文字');
         
         // 現在のURLに追加
-        const baseUrl = window.location.href.split('?')[0];
-        const shareUrl = `${baseUrl}?feedback=${encodedData}`;
+        const baseUrl = window.location.href.split('?')[0].split('#')[0];
+        const shareUrl = `${baseUrl}?feedback=${base64Data}`;
+        
+        console.log('共有URL生成成功:', shareUrl.length, '文字');
         
         // クリップボードにコピー
-        navigator.clipboard.writeText(shareUrl).then(() => {
-          alert(`共有URLをクリップボードにコピーしました!\n\n指示件数: ${feedbacks.length}件\n\nこのURLを共有すると、受け取った人は指示を確認できます。`);
-        }).catch(() => {
-          // コピー失敗時はプロンプト表示
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(shareUrl).then(() => {
+            alert(`共有URLをクリップボードにコピーしました!\n\n指示件数: ${feedbacks.length}件\nURL長: ${shareUrl.length}文字\n\nこのURLを共有すると、受け取った人は指示を確認できます。`);
+          }).catch((err) => {
+            console.error('クリップボードコピー失敗:', err);
+            prompt('以下のURLをコピーして共有してください:', shareUrl);
+          });
+        } else {
+          // クリップボードAPIが使えない場合
           prompt('以下のURLをコピーして共有してください:', shareUrl);
-        });
+        }
         
       } catch (error) {
-        console.error('URL生成エラー:', error);
-        alert('共有URL生成に失敗しました');
+        console.error('URL生成エラー詳細:', error);
+        console.error('エラースタック:', error.stack);
+        alert(`共有URL生成に失敗しました\n\nエラー: ${error.message}\n\nコンソールを確認してください`);
       }
     }
 
