@@ -128,8 +128,26 @@
           feedbacks.length = 0;
           document.querySelectorAll('.feedback-rect').forEach(el => el.remove());
           
+          // 新形式と旧形式の両方に対応
+          let feedbacksData;
+          if (data.feedbacks && Array.isArray(data.feedbacks)) {
+            // 新形式
+            feedbacksData = data.feedbacks;
+            
+            // サイズ差の警告
+            const currentWidth = document.body.scrollWidth;
+            const currentHeight = document.body.scrollHeight;
+            if (data.baseWidth && (Math.abs(currentWidth - data.baseWidth) > 100)) {
+              const sizeDiff = Math.round(((currentWidth - data.baseWidth) / data.baseWidth) * 100);
+              alert(`注意: このファイルは${data.baseWidth}x${data.baseHeight}pxで作成されました。\n現在の画面サイズ: ${currentWidth}x${currentHeight}px\n\n位置が${Math.abs(sizeDiff)}%程度ずれる可能性があります。`);
+            }
+          } else {
+            // 旧形式（配列のみ）
+            feedbacksData = data;
+          }
+          
           // データを読み込み
-          data.forEach(fb => {
+          feedbacksData.forEach(fb => {
             feedbacks.push(fb);
             createRect(fb);
           });
@@ -373,12 +391,34 @@
     }
 
     function createRect(feedback) {
+      // 相対位置から絶対位置を計算
+      const bodyWidth = document.body.scrollWidth;
+      const bodyHeight = document.body.scrollHeight;
+      
+      let rectData;
+      if (feedback.relativeRect) {
+        // 相対位置がある場合は現在の画面サイズで再計算
+        rectData = {
+          number: feedback.number,
+          left: Math.round((feedback.relativeRect.leftPercent / 100) * bodyWidth),
+          top: Math.round((feedback.relativeRect.topPercent / 100) * bodyHeight),
+          width: Math.round((feedback.relativeRect.widthPercent / 100) * bodyWidth),
+          height: Math.round((feedback.relativeRect.heightPercent / 100) * bodyHeight)
+        };
+        
+        // feedbackオブジェクトのrectも更新
+        feedback.rect = rectData;
+      } else {
+        // 旧形式（絶対座標）の場合はそのまま使用
+        rectData = feedback.rect;
+      }
+      
       const rect = document.createElement('div');
       rect.className = 'feedback-rect';
-      rect.style.left = feedback.rect.left + 'px';
-      rect.style.top = feedback.rect.top + 'px';
-      rect.style.width = feedback.rect.width + 'px';
-      rect.style.height = feedback.rect.height + 'px';
+      rect.style.left = rectData.left + 'px';
+      rect.style.top = rectData.top + 'px';
+      rect.style.width = rectData.width + 'px';
+      rect.style.height = rectData.height + 'px';
       
       setupRect(rect, feedback.number);
       document.body.appendChild(rect);
@@ -463,10 +503,29 @@
         return;
       }
       
+      // 相対位置で保存（パーセンテージ）
+      const bodyWidth = document.body.scrollWidth;
+      const bodyHeight = document.body.scrollHeight;
+      
       const feedback = {
         number: rectData.number,
         comment,
-        rect: rectData,
+        rect: {
+          number: rectData.number,
+          left: rectData.left,
+          top: rectData.top,
+          width: rectData.width,
+          height: rectData.height
+        },
+        // 相対位置を追加保存
+        relativeRect: {
+          leftPercent: (rectData.left / bodyWidth) * 100,
+          topPercent: (rectData.top / bodyHeight) * 100,
+          widthPercent: (rectData.width / bodyWidth) * 100,
+          heightPercent: (rectData.height / bodyHeight) * 100
+        },
+        baseWidth: bodyWidth,
+        baseHeight: bodyHeight,
         url: window.location.href,
         timestamp: new Date().toLocaleString('ja-JP')
       };
@@ -541,7 +600,16 @@
         return;
       }
 
-      const dataStr = JSON.stringify(feedbacks, null, 2);
+      // 出力情報を追加
+      const exportData = {
+        version: '1.1',
+        createdAt: new Date().toISOString(),
+        baseWidth: document.body.scrollWidth,
+        baseHeight: document.body.scrollHeight,
+        feedbacks: feedbacks
+      };
+
+      const dataStr = JSON.stringify(exportData, null, 2);
       const blob = new Blob([dataStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -550,7 +618,7 @@
       link.click();
       URL.revokeObjectURL(url);
       
-      alert(`${feedbacks.length}件の指示をファイルに出力しました`);
+      alert(`${feedbacks.length}件の指示をファイルに出力しました\n\n基準サイズ: ${exportData.baseWidth}x${exportData.baseHeight}px`);
     }
 
     function clearAll() {
