@@ -21,7 +21,13 @@
 
   function loadSharedFeedback(encodedData) {
     try {
-      const jsonData = atob(decodeURIComponent(encodedData));
+      // Base64デコード（日本語対応）
+      const binaryString = atob(encodedData);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const jsonData = new TextDecoder().decode(bytes);
       const feedbacks = JSON.parse(jsonData);
       
       // スタイルを追加
@@ -465,11 +471,13 @@
       try {
         console.log('feedbacks:', feedbacks);
         
-        // データをJSON化してBase64エンコード
+        // データをJSON化
         const jsonData = JSON.stringify(feedbacks);
         console.log('JSON化成功:', jsonData.length, '文字');
         
-        const base64Data = btoa(unescape(encodeURIComponent(jsonData)));
+        // 日本語対応のBase64エンコード
+        const utf8Bytes = new TextEncoder().encode(jsonData);
+        const base64Data = btoa(String.fromCharCode(...utf8Bytes));
         console.log('Base64化成功:', base64Data.length, '文字');
         
         // 現在のURLに追加
