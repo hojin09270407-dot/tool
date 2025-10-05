@@ -30,13 +30,22 @@
       <button class="feedback-tool-btn feedback-tool-btn-primary" id="toggleAddingMode">
         🖱️ 範囲指定モード開始
       </button>
-      <div style="margin: 10px 0; padding: 10px; border: 2px dashed #ddd; border-radius: 4px; text-align: center; background: #f8f9fa; cursor: pointer;" id="importArea">
-        <div style="font-size: 13px; color: #666;">📁 ファイルをドロップ</div>
-        <div style="font-size: 11px; color: #999; margin-top: 4px;">または クリックして選択</div>
-        <input type="file" id="fileInput" accept=".json" style="display: none;">
+      <div style="margin: 10px 0;">
+        <div style="margin-bottom: 8px; padding: 10px; border: 2px dashed #ddd; border-radius: 4px; text-align: center; background: #f8f9fa; cursor: pointer;" id="importArea">
+          <div style="font-size: 13px; color: #666;">📁 ファイルをドロップ</div>
+          <div style="font-size: 11px; color: #999; margin-top: 4px;">または クリックして選択</div>
+          <input type="file" id="fileInput" accept=".json" style="display: none;">
+        </div>
+        <textarea id="clipboardInput" placeholder="共有コードを貼り付け" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; min-height: 60px; box-sizing: border-box; font-family: monospace; resize: vertical;"></textarea>
+        <button class="feedback-tool-btn" id="loadFromClipboard" style="background: #17a2b8; color: white; margin-top: 5px;">
+          📋 共有コードから読み込み
+        </button>
       </div>
       <button class="feedback-tool-btn feedback-tool-btn-success" id="exportData" disabled>
-        📥 データ出力 <span class="feedback-count">0</span>
+        📥 ファイル出力 <span class="feedback-count">0</span>
+      </button>
+      <button class="feedback-tool-btn feedback-tool-btn-success" id="copyToClipboard" disabled>
+        📤 共有コード生成
       </button>
       <button class="feedback-tool-btn feedback-tool-btn-danger" id="clearAll" disabled>
         🗑️ すべてクリア
