@@ -162,6 +162,8 @@
     }
 
     document.getElementById('exportData').addEventListener('click', exportData);
+    document.getElementById('copyToClipboard').addEventListener('click', copyToClipboard);
+    document.getElementById('loadFromClipboard').addEventListener('click', loadFromClipboard);
     document.getElementById('clearAll').addEventListener('click', clearAll);
     document.getElementById('closePanel').addEventListener('click', () => {
       if (confirm('修正指示ツールを終了しますか?')) {
@@ -360,6 +362,10 @@
         height: parseInt(currentRect.style.height)
       };
       
+      // 配置されたDOM要素を特定
+      const targetElement = getElementAtPosition(rectData.left + rectData.width / 2, rectData.top + rectData.height / 2);
+      rectData.domSelector = targetElement ? generateSelector(targetElement) : null;
+      
       // ラベルとリサイズハンドルを追加
       setupRect(currentRect, rectCounter);
       
@@ -401,12 +407,56 @@
     }
 
     function createRect(feedback) {
+      let rectData = feedback.rect;
+      
+      // DOM要素ベースで位置を再計算
+      if (feedback.rect.domSelector) {
+        console.log('Loading with selector:', feedback.rect.domSelector);
+        try {
+          const element = document.querySelector(feedback.rect.domSelector);
+          if (element) {
+            const elemRect = element.getBoundingClientRect();
+            const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+            const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+            
+            // 元の相対位置を維持
+            const relativeLeft = feedback.rect.relativeLeft || 0;
+            const relativeTop = feedback.rect.relativeTop || 0;
+            
+            const newLeft = Math.round(elemRect.left + scrollX + relativeLeft);
+            const newTop = Math.round(elemRect.top + scrollY + relativeTop);
+            
+            console.log('Element found, repositioning:', {
+              elementPos: { left: elemRect.left + scrollX, top: elemRect.top + scrollY },
+              relative: { left: relativeLeft, top: relativeTop },
+              newPos: { left: newLeft, top: newTop }
+            });
+            
+            rectData = {
+              ...rectData,
+              left: newLeft,
+              top: newTop
+            };
+            
+            // feedbackオブジェクトも更新
+            feedback.rect.left = rectData.left;
+            feedback.rect.top = rectData.top;
+          } else {
+            console.warn('DOM要素が見つかりません:', feedback.rect.domSelector);
+          }
+        } catch (error) {
+          console.error('セレクタエラー:', error);
+        }
+      } else {
+        console.log('No DOM selector, using absolute position');
+      }
+      
       const rect = document.createElement('div');
       rect.className = 'feedback-rect';
-      rect.style.left = feedback.rect.left + 'px';
-      rect.style.top = feedback.rect.top + 'px';
-      rect.style.width = feedback.rect.width + 'px';
-      rect.style.height = feedback.rect.height + 'px';
+      rect.style.left = rectData.left + 'px';
+      rect.style.top = rectData.top + 'px';
+      rect.style.width = rectData.width + 'px';
+      rect.style.height = rectData.height + 'px';
       
       setupRect(rect, feedback.number);
       document.body.appendChild(rect);
@@ -491,6 +541,32 @@
         return;
       }
       
+      // DOM要素ベースの情報を追加保存
+      const centerX = rectData.left + rectData.width / 2;
+      const centerY = rectData.top + rectData.height / 2;
+      const targetElement = getElementAtPosition(centerX, centerY);
+      
+      if (targetElement) {
+        const elemRect = targetElement.getBoundingClientRect();
+        const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+        const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        
+        const selector = generateSelector(targetElement);
+        console.log('Generated selector:', selector);
+        
+        rectData.domSelector = selector;
+        rectData.relativeLeft = rectData.left - (elemRect.left + scrollX);
+        rectData.relativeTop = rectData.top - (elemRect.top + scrollY);
+        
+        console.log('Saved with DOM info:', {
+          selector,
+          relativeLeft: rectData.relativeLeft,
+          relativeTop: rectData.relativeTop
+        });
+      } else {
+        console.warn('DOM element not found at position');
+      }
+      
       const feedback = {
         number: rectData.number,
         comment,
@@ -555,12 +631,144 @@
     function updateButtons() {
       const hasData = feedbacks.length > 0;
       document.getElementById('exportData').disabled = !hasData;
+      document.getElementById('copyToClipboard').disabled = !hasData;
       document.getElementById('clearAll').disabled = !hasData;
       
       const countBadge = document.querySelector('.feedback-count');
       if (countBadge) {
         countBadge.textContent = feedbacks.length;
       }
+    }
+
+    function copyToClipboard() {
+      if (feedbacks.length === 0) {
+        alert('共有する指示がありません');
+        return;
+      }
+
+      try {
+        const jsonData = JSON.stringify(feedbacks);
+        const compressed = btoa(encodeURIComponent(jsonData));
+        const shareCode = `FBK:${compressed}`;
+        
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(shareCode).then(() => {
+            alert(`共有コードをクリップボードにコピーしました!\n\n指示件数: ${feedbacks.length}件\n\nSlackやメールに貼り付けて共有してください。`);
+          }).catch(() => {
+            prompt('以下の共有コードをコピーして共有してください:', shareCode);
+          });
+        } else {
+          prompt('以下の共有コードをコピーして共有してください:', shareCode);
+        }
+      } catch (error) {
+        console.error('共有コード生成エラー:', error);
+        alert('共有コード生成に失敗しました');
+      }
+    }
+
+    function loadFromClipboard() {
+      const input = document.getElementById('clipboardInput').value.trim();
+      
+      if (!input) {
+        alert('共有コードを貼り付けてください');
+        return;
+      }
+      
+      if (!input.startsWith('FBK:')) {
+        alert('無効な共有コードです');
+        return;
+      }
+      
+      try {
+        const compressed = input.substring(4);
+        const jsonData = decodeURIComponent(atob(compressed));
+        const data = JSON.parse(jsonData);
+        
+        // 既存の矩形とデータをクリア
+        feedbacks.length = 0;
+        document.querySelectorAll('.feedback-rect').forEach(el => el.remove());
+        
+        // データを読み込み
+        data.forEach(fb => {
+          feedbacks.push(fb);
+          createRect(fb);
+        });
+        
+        rectCounter = Math.max(...feedbacks.map(f => f.number), 0);
+        updateFeedbackList();
+        updateButtons();
+        
+        document.getElementById('clipboardInput').value = '';
+        alert(`${feedbacks.length}件の指示を読み込みました`);
+      } catch (error) {
+        console.error('読み込みエラー:', error);
+        alert('共有コードの読み込みに失敗しました');
+      }
+    }
+
+    function getElementAtPosition(x, y) {
+      // 一時的に矩形と吹き出しを非表示
+      const rects = document.querySelectorAll('.feedback-rect, .feedback-balloon, .feedback-tool-panel');
+      const originalPointers = [];
+      rects.forEach(el => {
+        originalPointers.push(el.style.pointerEvents);
+        el.style.display = 'none';
+      });
+      
+      // スクロール位置を考慮した座標でelementを取得
+      const clientX = x - window.pageXOffset;
+      const clientY = y - window.pageYOffset;
+      const element = document.elementFromPoint(clientX, clientY);
+      
+      // 元に戻す
+      rects.forEach((el, i) => {
+        el.style.display = '';
+        el.style.pointerEvents = originalPointers[i];
+      });
+      
+      console.log('Position:', x, y, 'Element:', element);
+      return element && element !== document.body && element !== document.documentElement ? element : null;
+    }
+
+    function generateSelector(element) {
+      if (!element) return null;
+      
+      // IDがある場合はIDを使用
+      if (element.id) {
+        return `#${element.id}`;
+      }
+      
+      // パスを生成
+      const path = [];
+      let current = element;
+      
+      while (current && current !== document.body) {
+        let selector = current.tagName.toLowerCase();
+        
+        // クラスがある場合は追加
+        if (current.className && typeof current.className === 'string') {
+          const classes = current.className.trim().split(/\s+/)
+            .filter(c => c && !c.startsWith('feedback-')); // ツール自身のクラスは除外
+          if (classes.length > 0) {
+            selector += '.' + classes.join('.');
+          }
+        }
+        
+        // 兄弟要素の中での位置
+        if (current.parentElement) {
+          const siblings = Array.from(current.parentElement.children)
+            .filter(el => el.tagName === current.tagName);
+          if (siblings.length > 1) {
+            const index = siblings.indexOf(current) + 1;
+            selector += `:nth-of-type(${index})`;
+          }
+        }
+        
+        path.unshift(selector);
+        current = current.parentElement;
+      }
+      
+      return path.join(' > ');
     }
 
     function exportData() {
