@@ -21,13 +21,11 @@
 
   function loadSharedFeedback(encodedData) {
     try {
-      // Base64デコード（日本語対応）
-      const binaryString = atob(encodedData);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+      // LZ-String で解凍
+      const jsonData = LZString.decompressFromEncodedURIComponent(encodedData);
+      if (!jsonData) {
+        throw new Error('データの解凍に失敗しました');
       }
-      const jsonData = new TextDecoder().decode(bytes);
       const feedbacks = JSON.parse(jsonData);
       
       // スタイルを追加
@@ -475,21 +473,28 @@
         const jsonData = JSON.stringify(feedbacks);
         console.log('JSON化成功:', jsonData.length, '文字');
         
-        // 日本語対応のBase64エンコード
-        const utf8Bytes = new TextEncoder().encode(jsonData);
-        const base64Data = btoa(String.fromCharCode(...utf8Bytes));
-        console.log('Base64化成功:', base64Data.length, '文字');
+        // LZ-Stringで圧縮
+        const compressed = LZString.compressToEncodedURIComponent(jsonData);
+        console.log('圧縮成功:', compressed.length, '文字');
+        console.log('圧縮率:', Math.round((1 - compressed.length / jsonData.length) * 100) + '%削減');
         
         // 現在のURLに追加
         const baseUrl = window.location.href.split('?')[0].split('#')[0];
-        const shareUrl = `${baseUrl}?feedback=${base64Data}`;
+        const shareUrl = `${baseUrl}?feedback=${compressed}`;
         
         console.log('共有URL生成成功:', shareUrl.length, '文字');
+        
+        // URL長の警告
+        if (shareUrl.length > 2000) {
+          if (!confirm(`警告: URLが${shareUrl.length}文字と長いため、一部のブラウザで動作しない可能性があります。\n\n続行しますか?`)) {
+            return;
+          }
+        }
         
         // クリップボードにコピー
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(shareUrl).then(() => {
-            alert(`共有URLをクリップボードにコピーしました!\n\n指示件数: ${feedbacks.length}件\nURL長: ${shareUrl.length}文字\n\nこのURLを共有すると、受け取った人は指示を確認できます。`);
+            alert(`共有URLをクリップボードにコピーしました!\n\n指示件数: ${feedbacks.length}件\nURL長: ${shareUrl.length}文字\n圧縮率: ${Math.round((1 - compressed.length / jsonData.length) * 100)}%削減\n\nこのURLを共有すると、受け取った人は指示を確認できます。`);
           }).catch((err) => {
             console.error('クリップボードコピー失敗:', err);
             prompt('以下のURLをコピーして共有してください:', shareUrl);
