@@ -1,35 +1,142 @@
 (function() {
   'use strict';
 
+  // URLパラメータから共有データを確認
+  const urlParams = new URLSearchParams(window.location.search);
+  const sharedData = urlParams.get('feedback');
+  
+  if (sharedData) {
+    // 共有モードで起動
+    loadSharedFeedback(sharedData);
+    return;
+  }
+
   if (window.feedbackToolLoaded) {
     alert('修正指示ツールは既に起動しています');
     return;
   }
   window.feedbackToolLoaded = true;
 
-  // 必要なライブラリを読み込み
-  const libs = [
-    { name: 'html2canvas', url: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', check: () => window.html2canvas },
-    { name: 'xlsx', url: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', check: () => window.XLSX }
-  ];
+  initFeedbackTool();
 
-  let loadedCount = 0;
-  
-  libs.forEach(lib => {
-    if (!lib.check()) {
-      const script = document.createElement('script');
-      script.src = lib.url;
-      script.onload = () => {
-        loadedCount++;
-        if (loadedCount === libs.filter(l => !l.check()).length) {
-          initFeedbackTool();
-        }
-      };
-      document.head.appendChild(script);
-    } else {
-      initFeedbackTool();
+  function loadSharedFeedback(encodedData) {
+    try {
+      const jsonData = atob(decodeURIComponent(encodedData));
+      const feedbacks = JSON.parse(jsonData);
+      
+      // スタイルを追加
+      addStyles();
+      
+      // 共有モード用パネルを作成
+      const panel = document.createElement('div');
+      panel.className = 'feedback-tool-panel';
+      panel.innerHTML = `
+        <h3>📋 修正指示 (閲覧モード)</h3>
+        <div style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 13px;">
+          <strong>${feedbacks.length}件</strong>の指示があります
+        </div>
+        <div class="feedback-list" id="feedbackList"></div>
+        <button class="feedback-tool-btn" id="closePanel" style="background: #6c757d; color: white; margin-top: 10px;">
+          ✕ 閉じる
+        </button>
+      `;
+      document.body.appendChild(panel);
+      
+      // 矩形とラベルを表示
+      feedbacks.forEach(fb => {
+        const rect = document.createElement('div');
+        rect.className = 'feedback-rect';
+        rect.style.left = fb.rect.left + 'px';
+        rect.style.top = fb.rect.top + 'px';
+        rect.style.width = fb.rect.width + 'px';
+        rect.style.height = fb.rect.height + 'px';
+        rect.style.pointerEvents = 'auto';
+        
+        const label = document.createElement('div');
+        label.className = 'feedback-rect-label';
+        label.textContent = fb.number;
+        rect.appendChild(label);
+        
+        document.body.appendChild(rect);
+        
+        // クリックで詳細表示
+        label.addEventListener('click', () => {
+          showSharedBalloon(fb);
+        });
+      });
+      
+      // リスト表示
+      const list = document.getElementById('feedbackList');
+      list.innerHTML = feedbacks.map(fb => `
+        <div class="feedback-list-item" style="cursor: pointer;" data-number="${fb.number}">
+          <strong>No.${fb.number}</strong> [${fb.priority}] ${fb.category}<br>
+          <small>${fb.comment.substring(0, 30)}${fb.comment.length > 30 ? '...' : ''}</small>
+        </div>
+      `).join('');
+      
+      // リストアイテムクリックで詳細表示
+      document.querySelectorAll('.feedback-list-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const number = parseInt(item.dataset.number);
+          const fb = feedbacks.find(f => f.number === number);
+          if (fb) {
+            showSharedBalloon(fb);
+            // 矩形までスクロール
+            const rect = document.querySelector(`.feedback-rect [data-number="${number}"]`)?.parentElement;
+            if (rect) {
+              rect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }
+        });
+      });
+      
+      document.getElementById('closePanel').addEventListener('click', () => {
+        panel.remove();
+        document.querySelectorAll('.feedback-rect, .feedback-balloon').forEach(el => el.remove());
+      });
+      
+    } catch (error) {
+      console.error('共有データの読み込みに失敗:', error);
+      alert('共有URLが無効です');
     }
-  });
+  }
+
+  function showSharedBalloon(fb) {
+    // 既存の吹き出しを削除
+    const existing = document.querySelector('.feedback-balloon');
+    if (existing) existing.remove();
+    
+    const balloon = document.createElement('div');
+    balloon.className = 'feedback-balloon';
+    balloon.style.left = (fb.rect.left + fb.rect.width + 20) + 'px';
+    balloon.style.top = fb.rect.top + 'px';
+    
+    balloon.innerHTML = `
+      <h4>📝 指示 No.${fb.number}</h4>
+      <div class="feedback-balloon-group">
+        <label>指示内容</label>
+        <div style="padding: 8px; background: #f8f9fa; border-radius: 4px; white-space: pre-wrap;">${fb.comment}</div>
+      </div>
+      <div class="feedback-balloon-group">
+        <label>優先度</label>
+        <div style="padding: 8px; background: #f8f9fa; border-radius: 4px;"><strong>${fb.priority}</strong></div>
+      </div>
+      <div class="feedback-balloon-group">
+        <label>カテゴリ</label>
+        <div style="padding: 8px; background: #f8f9fa; border-radius: 4px;">${fb.category}</div>
+      </div>
+      <div style="font-size: 11px; color: #999; margin-top: 8px;">作成: ${fb.timestamp}</div>
+      <div class="feedback-balloon-buttons">
+        <button id="balloonClose" style="background: #6c757d; color: white; width: 100%;">閉じる</button>
+      </div>
+    `;
+    
+    document.body.appendChild(balloon);
+    
+    document.getElementById('balloonClose').addEventListener('click', () => {
+      balloon.remove();
+    });
+  }
 
   function initFeedbackTool() {
     const feedbacks = [];
@@ -39,198 +146,7 @@
     let rectCounter = 0;
 
     // スタイルを追加
-    const style = document.createElement('style');
-    style.textContent = `
-      .feedback-tool-panel {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: white;
-        border: 2px solid #333;
-        border-radius: 8px;
-        padding: 15px;
-        z-index: 999999;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        min-width: 280px;
-        cursor: move;
-      }
-      .feedback-tool-panel h3 {
-        margin: 0 0 15px 0;
-        font-size: 16px;
-        color: #333;
-        border-bottom: 2px solid #007bff;
-        padding-bottom: 8px;
-      }
-      .feedback-tool-btn {
-        display: block;
-        width: 100%;
-        padding: 10px;
-        margin: 8px 0;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 600;
-        transition: all 0.2s;
-      }
-      .feedback-tool-btn-primary {
-        background: #007bff;
-        color: white;
-      }
-      .feedback-tool-btn-primary:hover {
-        background: #0056b3;
-      }
-      .feedback-tool-btn-success {
-        background: #28a745;
-        color: white;
-      }
-      .feedback-tool-btn-success:hover {
-        background: #1e7e34;
-      }
-      .feedback-tool-btn-danger {
-        background: #dc3545;
-        color: white;
-      }
-      .feedback-tool-btn-danger:hover {
-        background: #c82333;
-      }
-      .feedback-tool-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .feedback-rect {
-        position: absolute;
-        border: 3px solid #dc3545;
-        background: rgba(220, 53, 69, 0.1);
-        pointer-events: none;
-        z-index: 999997;
-        box-sizing: border-box;
-      }
-      .feedback-rect-label {
-        position: absolute;
-        top: -30px;
-        left: 0;
-        background: #dc3545;
-        color: white;
-        padding: 4px 10px;
-        border-radius: 4px;
-        font-weight: bold;
-        font-size: 14px;
-        font-family: sans-serif;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        pointer-events: auto;
-        cursor: pointer;
-      }
-      .feedback-rect-label:hover {
-        background: #c82333;
-      }
-      .feedback-balloon {
-        position: absolute;
-        background: white;
-        border: 2px solid #333;
-        border-radius: 8px;
-        padding: 15px;
-        min-width: 300px;
-        z-index: 999998;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      }
-      .feedback-balloon::before {
-        content: '';
-        position: absolute;
-        left: -10px;
-        top: 20px;
-        width: 0;
-        height: 0;
-        border-top: 10px solid transparent;
-        border-bottom: 10px solid transparent;
-        border-right: 10px solid #333;
-      }
-      .feedback-balloon::after {
-        content: '';
-        position: absolute;
-        left: -7px;
-        top: 22px;
-        width: 0;
-        height: 0;
-        border-top: 8px solid transparent;
-        border-bottom: 8px solid transparent;
-        border-right: 8px solid white;
-      }
-      .feedback-balloon h4 {
-        margin: 0 0 12px 0;
-        font-size: 15px;
-        color: #333;
-      }
-      .feedback-balloon-group {
-        margin-bottom: 10px;
-      }
-      .feedback-balloon-group label {
-        display: block;
-        margin-bottom: 4px;
-        font-weight: 600;
-        font-size: 13px;
-        color: #555;
-      }
-      .feedback-balloon-group textarea,
-      .feedback-balloon-group select {
-        width: 100%;
-        padding: 6px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-size: 13px;
-        box-sizing: border-box;
-        font-family: inherit;
-      }
-      .feedback-balloon-group textarea {
-        min-height: 80px;
-        resize: vertical;
-      }
-      .feedback-balloon-buttons {
-        display: flex;
-        gap: 8px;
-        margin-top: 12px;
-      }
-      .feedback-balloon-buttons button {
-        flex: 1;
-        padding: 8px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 13px;
-      }
-      .feedback-count {
-        background: #dc3545;
-        color: white;
-        border-radius: 12px;
-        padding: 2px 8px;
-        font-size: 12px;
-        font-weight: bold;
-        display: inline-block;
-        margin-left: 8px;
-      }
-      .feedback-adding-mode {
-        background: #28a745 !important;
-      }
-      .feedback-list {
-        max-height: 200px;
-        overflow-y: auto;
-        margin: 10px 0;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-      }
-      .feedback-list-item {
-        padding: 8px;
-        border-bottom: 1px solid #eee;
-        font-size: 13px;
-      }
-      .feedback-list-item:last-child {
-        border-bottom: none;
-      }
-    `;
-    document.head.appendChild(style);
+    addStyles();
 
     // コントロールパネルを作成
     const panel = document.createElement('div');
@@ -240,8 +156,8 @@
       <button class="feedback-tool-btn feedback-tool-btn-primary" id="toggleAddingMode">
         🖱️ 範囲指定モード開始
       </button>
-      <button class="feedback-tool-btn feedback-tool-btn-success" id="exportExcel" ${feedbacks.length === 0 ? 'disabled' : ''}>
-        📊 Excel出力 <span class="feedback-count">${feedbacks.length}</span>
+      <button class="feedback-tool-btn feedback-tool-btn-success" id="shareUrl" ${feedbacks.length === 0 ? 'disabled' : ''}>
+        📤 共有URL生成 <span class="feedback-count">${feedbacks.length}</span>
       </button>
       <button class="feedback-tool-btn feedback-tool-btn-danger" id="clearAll" ${feedbacks.length === 0 ? 'disabled' : ''}>
         🗑️ すべてクリア
@@ -300,7 +216,7 @@
       }
     });
 
-    document.getElementById('exportExcel').addEventListener('click', exportToExcel);
+    document.getElementById('shareUrl').addEventListener('click', generateShareUrl);
     document.getElementById('clearAll').addEventListener('click', clearAll);
     document.getElementById('closePanel').addEventListener('click', () => {
       if (confirm('修正指示ツールを終了しますか?')) {
@@ -531,7 +447,7 @@
 
     function updateButtons() {
       const hasData = feedbacks.length > 0;
-      document.getElementById('exportExcel').disabled = !hasData;
+      document.getElementById('shareUrl').disabled = !hasData;
       document.getElementById('clearAll').disabled = !hasData;
       
       const countBadge = document.querySelector('.feedback-count');
@@ -540,82 +456,32 @@
       }
     }
 
-    async function exportToExcel() {
+    function generateShareUrl() {
       if (feedbacks.length === 0) {
-        alert('エクスポートする指示がありません');
+        alert('共有する指示がありません');
         return;
       }
 
       try {
-        // 全画面スクリーンショットを取得(矩形マーキング付き)
-        const canvas = await html2canvas(document.body, {
-          allowTaint: true,
-          useCORS: true,
-          scrollY: -window.scrollY,
-          scrollX: -window.scrollX,
-          windowWidth: document.documentElement.scrollWidth,
-          windowHeight: document.documentElement.scrollHeight
+        // データをJSON化してBase64エンコード
+        const jsonData = JSON.stringify(feedbacks);
+        const encodedData = encodeURIComponent(btoa(jsonData));
+        
+        // 現在のURLに追加
+        const baseUrl = window.location.href.split('?')[0];
+        const shareUrl = `${baseUrl}?feedback=${encodedData}`;
+        
+        // クリップボードにコピー
+        navigator.clipboard.writeText(shareUrl).then(() => {
+          alert(`共有URLをクリップボードにコピーしました!\n\n指示件数: ${feedbacks.length}件\n\nこのURLを共有すると、受け取った人は指示を確認できます。`);
+        }).catch(() => {
+          // コピー失敗時はプロンプト表示
+          prompt('以下のURLをコピーして共有してください:', shareUrl);
         });
-        
-        const imgData = canvas.toDataURL('image/png');
-        
-        // Excelワークブック作成
-        const wb = XLSX.utils.book_new();
-        
-        // データ配列作成
-        const data = [
-          ['', 'No.', '指示内容', '優先度', 'カテゴリ', '作成日時', 'ページURL']
-        ];
-        
-        feedbacks.forEach(fb => {
-          data.push([
-            '',
-            fb.number,
-            fb.comment,
-            fb.priority,
-            fb.category,
-            fb.timestamp,
-            fb.url
-          ]);
-        });
-        
-        const ws = XLSX.utils.aoa_to_sheet(data);
-        
-        // 列幅設定
-        ws['!cols'] = [
-          { wch: 50 }, // A列(画像用)
-          { wch: 5 },  // No.
-          { wch: 60 }, // 指示内容
-          { wch: 8 },  // 優先度
-          { wch: 12 }, // カテゴリ
-          { wch: 20 }, // 作成日時
-          { wch: 50 }  // URL
-        ];
-        
-        // 行の高さ設定（画像用）
-        ws['!rows'] = [{ hpt: 20 }]; // ヘッダー行
-        for (let i = 0; i < feedbacks.length; i++) {
-          ws['!rows'].push({ hpt: 400 }); // 画像表示用に高く設定
-        }
-        
-        XLSX.utils.book_append_sheet(wb, ws, '修正指示一覧');
-        
-        // ファイル名生成
-        const filename = `修正指示書_${new Date().toISOString().slice(0, 10)}.xlsx`;
-        
-        XLSX.writeFile(wb, filename);
-        
-        alert(`${feedbacks.length}件の指示をExcelファイルとして出力しました\n※スクリーンショット画像はA列に手動で貼り付けてください`);
-        
-        // 画像を別途ダウンロード
-        const link = document.createElement('a');
-        link.download = `修正指示_スクリーンショット_${new Date().toISOString().slice(0, 10)}.png`;
-        link.href = imgData;
-        link.click();
         
       } catch (error) {
-        console.error('エクスポートエラー:', error);
-        alert('エクスポート中にエラーが発生しました');
+        console.error('URL生成エラー:', error);
+        alert('共有URL生成に失敗しました');
       }
     }
 
@@ -628,5 +494,204 @@
         updateButtons();
       }
     }
+  }
+
+  function addStyles() {
+    if (document.getElementById('feedback-tool-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'feedback-tool-styles';
+    style.textContent = `
+      .feedback-tool-panel {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: white;
+        border: 2px solid #333;
+        border-radius: 8px;
+        padding: 15px;
+        z-index: 999999;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        min-width: 280px;
+        cursor: move;
+      }
+      .feedback-tool-panel h3 {
+        margin: 0 0 15px 0;
+        font-size: 16px;
+        color: #333;
+        border-bottom: 2px solid #007bff;
+        padding-bottom: 8px;
+        cursor: move;
+      }
+      .feedback-tool-btn {
+        display: block;
+        width: 100%;
+        padding: 10px;
+        margin: 8px 0;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+        transition: all 0.2s;
+      }
+      .feedback-tool-btn-primary {
+        background: #007bff;
+        color: white;
+      }
+      .feedback-tool-btn-primary:hover {
+        background: #0056b3;
+      }
+      .feedback-tool-btn-success {
+        background: #28a745;
+        color: white;
+      }
+      .feedback-tool-btn-success:hover {
+        background: #1e7e34;
+      }
+      .feedback-tool-btn-danger {
+        background: #dc3545;
+        color: white;
+      }
+      .feedback-tool-btn-danger:hover {
+        background: #c82333;
+      }
+      .feedback-tool-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .feedback-rect {
+        position: absolute;
+        border: 3px solid #dc3545;
+        background: rgba(220, 53, 69, 0.1);
+        pointer-events: none;
+        z-index: 999997;
+        box-sizing: border-box;
+      }
+      .feedback-rect-label {
+        position: absolute;
+        top: -30px;
+        left: 0;
+        background: #dc3545;
+        color: white;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-weight: bold;
+        font-size: 14px;
+        font-family: sans-serif;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        pointer-events: auto;
+        cursor: pointer;
+      }
+      .feedback-rect-label:hover {
+        background: #c82333;
+      }
+      .feedback-balloon {
+        position: absolute;
+        background: white;
+        border: 2px solid #333;
+        border-radius: 8px;
+        padding: 15px;
+        min-width: 300px;
+        z-index: 999998;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      .feedback-balloon::before {
+        content: '';
+        position: absolute;
+        left: -10px;
+        top: 20px;
+        width: 0;
+        height: 0;
+        border-top: 10px solid transparent;
+        border-bottom: 10px solid transparent;
+        border-right: 10px solid #333;
+      }
+      .feedback-balloon::after {
+        content: '';
+        position: absolute;
+        left: -7px;
+        top: 22px;
+        width: 0;
+        height: 0;
+        border-top: 8px solid transparent;
+        border-bottom: 8px solid transparent;
+        border-right: 8px solid white;
+      }
+      .feedback-balloon h4 {
+        margin: 0 0 12px 0;
+        font-size: 15px;
+        color: #333;
+      }
+      .feedback-balloon-group {
+        margin-bottom: 10px;
+      }
+      .feedback-balloon-group label {
+        display: block;
+        margin-bottom: 4px;
+        font-weight: 600;
+        font-size: 13px;
+        color: #555;
+      }
+      .feedback-balloon-group textarea,
+      .feedback-balloon-group select {
+        width: 100%;
+        padding: 6px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 13px;
+        box-sizing: border-box;
+        font-family: inherit;
+      }
+      .feedback-balloon-group textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+      .feedback-balloon-buttons {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .feedback-balloon-buttons button {
+        flex: 1;
+        padding: 8px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .feedback-count {
+        background: #dc3545;
+        color: white;
+        border-radius: 12px;
+        padding: 2px 8px;
+        font-size: 12px;
+        font-weight: bold;
+        display: inline-block;
+        margin-left: 8px;
+      }
+      .feedback-adding-mode {
+        background: #28a745 !important;
+      }
+      .feedback-list {
+        max-height: 200px;
+        overflow-y: auto;
+        margin: 10px 0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      .feedback-list-item {
+        padding: 8px;
+        border-bottom: 1px solid #eee;
+        font-size: 13px;
+      }
+      .feedback-list-item:last-child {
+        border-bottom: none;
+      }
+    `;
+    document.head.appendChild(style);
   }
 })();
