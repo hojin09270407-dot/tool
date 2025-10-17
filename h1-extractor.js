@@ -153,7 +153,11 @@
       const parser = new DOMParser();
       const doc = parser.parseFromString(text, 'text/html');
       const h1Elements = doc.querySelectorAll('h1');
-      const h1Texts = Array.from(h1Elements).map(h1 => h1.textContent.trim()).filter(t => t);
+      
+      // textContentで全テキストを取得（子要素含む）し、余分な空白を削除
+      const h1Texts = Array.from(h1Elements).map(h1 => {
+        return h1.textContent.replace(/\s+/g, ' ').trim();
+      }).filter(t => t);
       
       return {
         url,
