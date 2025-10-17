@@ -19,7 +19,7 @@
       background: white;
       border-radius: 12px;
       padding: 24px;
-      max-width: 600px;
+      max-width: 700px;
       width: 90%;
       max-height: 80vh;
       overflow-y: auto;
@@ -50,11 +50,15 @@
       cursor: pointer;
       margin: 8px 8px 8px 0;
     }
+    #h1-extractor-content button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
     .h1-btn-primary {
       background: #4f46e5;
       color: white;
     }
-    .h1-btn-primary:hover {
+    .h1-btn-primary:hover:not(:disabled) {
       background: #4338ca;
     }
     .h1-btn-secondary {
@@ -88,6 +92,10 @@
       background: #fef2f2;
       border-color: #fca5a5;
     }
+    .h1-result-loading {
+      background: #fef3c7;
+      border-color: #fcd34d;
+    }
     .h1-result-url {
       font-size: 12px;
       color: #666;
@@ -103,10 +111,25 @@
       color: #dc2626;
       font-size: 14px;
     }
-    .h1-loading {
-      color: #4f46e5;
-      font-weight: 600;
-      margin-top: 12px;
+    .h1-loading-text {
+      color: #d97706;
+      font-size: 14px;
+    }
+    .h1-info-box {
+      background: #eff6ff;
+      border: 2px solid #93c5fd;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      color: #1e40af;
+    }
+    #h1-hidden-iframe {
+      position: fixed;
+      top: -9999px;
+      left: -9999px;
+      width: 1px;
+      height: 1px;
     }
   `;
   document.head.appendChild(style);
@@ -116,8 +139,12 @@
   modal.id = 'h1-extractor-modal';
   modal.innerHTML = `
     <div id="h1-extractor-content">
-      <h2>🔍 H1テキスト一括取得</h2>
-      <p style="color: #666; margin-bottom: 16px;">URLを1行ずつ入力してください</p>
+      <h2>🔍 H1テキスト一括取得（SPA対応）</h2>
+      <div class="h1-info-box">
+        <strong>📌 使い方:</strong><br>
+        URLを入力して「抽出開始」をクリックすると、各ページを自動で読み込んでH1を取得します。<br>
+        <small>※ iframeで読み込むため、数秒〜10秒程度かかります</small>
+      </div>
       <textarea id="h1-urls" placeholder="https://example.com&#10;https://example.org"></textarea>
       <div>
         <button class="h1-btn-primary" id="h1-extract-btn">抽出開始</button>
@@ -130,47 +157,113 @@
   document.body.appendChild(modal);
 
   let results = [];
+  let isExtracting = false;
 
   // 閉じるボタン
   document.getElementById('h1-close-btn').onclick = function() {
     modal.remove();
     style.remove();
+    const iframe = document.getElementById('h1-hidden-iframe');
+    if (iframe) iframe.remove();
   };
 
   // 背景クリックで閉じる
   modal.onclick = function(e) {
-    if (e.target === modal) {
+    if (e.target === modal && !isExtracting) {
       modal.remove();
       style.remove();
+      const iframe = document.getElementById('h1-hidden-iframe');
+      if (iframe) iframe.remove();
     }
   };
 
-  // H1抽出関数
-  async function extractH1(url) {
-    try {
-      const response = await fetch(url);
-      const text = await response.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(text, 'text/html');
-      const h1Elements = doc.querySelectorAll('h1');
+  // iframeでページを読み込んでH1を取得
+  function extractH1FromIframe(url, timeout = 10000) {
+    return new Promise((resolve) => {
+      const iframe = document.createElement('iframe');
+      iframe.id = 'h1-hidden-iframe';
+      iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
       
-      // textContentで全テキストを取得（子要素含む）し、余分な空白を削除
-      const h1Texts = Array.from(h1Elements).map(h1 => {
-        return h1.textContent.replace(/\s+/g, ' ').trim();
-      }).filter(t => t);
-      
-      return {
-        url,
-        success: true,
-        h1Texts: h1Texts.length > 0 ? h1Texts : ['H1タグが見つかりませんでした']
+      let timeoutId;
+      let resolved = false;
+
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (iframe.parentNode) iframe.remove();
       };
-    } catch (error) {
-      return {
-        url,
-        success: false,
-        error: error.message
+
+      const resolveOnce = (result) => {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(result);
+        }
       };
-    }
+
+      // タイムアウト設定
+      timeoutId = setTimeout(() => {
+        try {
+          const h1Elements = iframe.contentDocument?.querySelectorAll('h1');
+          if (h1Elements && h1Elements.length > 0) {
+            const h1Texts = Array.from(h1Elements).map(h1 => 
+              h1.textContent.replace(/\s+/g, ' ').trim()
+            ).filter(t => t);
+            resolveOnce({
+              url,
+              success: true,
+              h1Texts: h1Texts.length > 0 ? h1Texts : ['H1タグが見つかりませんでした']
+            });
+          } else {
+            resolveOnce({
+              url,
+              success: false,
+              error: 'タイムアウト：ページの読み込みに時間がかかりすぎました'
+            });
+          }
+        } catch (e) {
+          resolveOnce({
+            url,
+            success: false,
+            error: 'タイムアウト：' + e.message
+          });
+        }
+      }, timeout);
+
+      iframe.onload = function() {
+        // 追加で2秒待ってJavaScriptの実行を待つ
+        setTimeout(() => {
+          try {
+            const h1Elements = iframe.contentDocument.querySelectorAll('h1');
+            const h1Texts = Array.from(h1Elements).map(h1 => 
+              h1.textContent.replace(/\s+/g, ' ').trim()
+            ).filter(t => t);
+            
+            resolveOnce({
+              url,
+              success: true,
+              h1Texts: h1Texts.length > 0 ? h1Texts : ['H1タグが見つかりませんでした']
+            });
+          } catch (e) {
+            resolveOnce({
+              url,
+              success: false,
+              error: 'クロスオリジン制限: ' + e.message
+            });
+          }
+        }, 2000);
+      };
+
+      iframe.onerror = function() {
+        resolveOnce({
+          url,
+          success: false,
+          error: 'ページの読み込みに失敗しました'
+        });
+      };
+
+      document.body.appendChild(iframe);
+      iframe.src = url;
+    });
   }
 
   // 抽出開始
@@ -178,21 +271,37 @@
     const urls = document.getElementById('h1-urls').value
       .split('\n')
       .map(u => u.trim())
-      .filter(u => u);
+      .filter(u => u && u.startsWith('http'));
 
     if (urls.length === 0) {
-      alert('URLを入力してください');
+      alert('URLを入力してください（http:// または https:// で始まる必要があります）');
       return;
     }
 
+    isExtracting = true;
+    const extractBtn = document.getElementById('h1-extract-btn');
+    extractBtn.disabled = true;
+    extractBtn.textContent = '抽出中...';
+
     const resultsDiv = document.getElementById('h1-results');
-    resultsDiv.innerHTML = '<div class="h1-loading">抽出中...</div>';
+    resultsDiv.innerHTML = '';
     results = [];
 
-    for (const url of urls) {
-      const result = await extractH1(url);
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      
+      // 読み込み中表示
+      const loadingHTML = `<div class="h1-result-item h1-result-loading" id="result-${i}">
+           <div class="h1-result-url">${url}</div>
+           <div class="h1-loading-text">⏳ 読み込み中... (${i + 1}/${urls.length})</div>
+         </div>`;
+      resultsDiv.innerHTML += loadingHTML;
+
+      // H1を抽出
+      const result = await extractH1FromIframe(url);
       results.push(result);
       
+      // 結果を更新
       const resultHTML = result.success
         ? `<div class="h1-result-item h1-result-success">
              <div class="h1-result-url">${result.url}</div>
@@ -203,10 +312,12 @@
              <div class="h1-result-error-text">エラー: ${result.error}</div>
            </div>`;
       
-      resultsDiv.innerHTML += resultHTML;
+      document.getElementById(`result-${i}`).outerHTML = resultHTML;
     }
 
-    resultsDiv.querySelector('.h1-loading')?.remove();
+    extractBtn.disabled = false;
+    extractBtn.textContent = '抽出開始';
+    isExtracting = false;
     document.getElementById('h1-download-btn').style.display = 'inline-block';
   };
 
