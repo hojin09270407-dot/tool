@@ -3,7 +3,7 @@
     
     // 設定
     const CONFIG = {
-        baseUrl: '/tool/checker/', // サーバー上のベースURL
+        baseUrl: 'https://hojin09270407-dot.github.io/tool/checker/', // サーバー上のベースURL
         modules: [
             'core/utils.js',
             'core/ui.js',
