@@ -3,7 +3,7 @@
     
     // 設定
     const CONFIG = {
-        baseUrl: '/path/to/checker/', // サーバー上のベースURL
+        baseUrl: '/tool/checker/', // サーバー上のベースURL
         modules: [
             'core/utils.js',
             'core/ui.js',
