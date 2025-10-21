@@ -2938,7 +2938,7 @@
         return description;
     }
 
-    // スマホクオリティチェック（新版）- 実際にビューポートを変更してチェック
+    // スマホクオリティチェック
     function checkMobileQuality() {
         const viewports = {
             'iPhone SE': 375,
@@ -2946,204 +2946,248 @@
             'Galaxy S21+': 414
         };
         
-        const allIssues = {};
-        const originalViewport = window.innerWidth;
-        
-        return new Promise(async (resolve) => {
-            // 各画面サイズでチェック
-            for (const [deviceName, width] of Object.entries(viewports)) {
-                // ビューポートを一時的に変更してチェック
-                const issues = await checkQualityWithViewportSimulation(width);
-                
-                allIssues[deviceName] = {
-                    width: width,
-                    issues: issues,
-                    isCurrentViewport: Math.abs(width - originalViewport) < 50 // 現在の画面幅に近い場合
-                };
-            }
-            
-            resolve({
-                currentViewport: originalViewport,
-                results: allIssues,
-                summary: generateQualitySummary(allIssues)
-            });
-        });
-    }
-
-    // ビューポートをシミュレートしてチェック
-    async function checkQualityWithViewportSimulation(targetWidth) {
-        return new Promise((resolve) => {
-            // 一時的なiframeを作成して、そこで指定幅でページを表示
-            const iframe = document.createElement('iframe');
-            iframe.style.cssText = `
-                position: fixed;
-                top: -9999px;
-                left: -9999px;
-                width: ${targetWidth}px;
-                height: 800px;
-                border: none;
-                opacity: 0;
-                pointer-events: none;
-            `;
-            
-            document.body.appendChild(iframe);
-            
-            // 現在のページのHTMLをiframeに複製
-            iframe.onload = function() {
-                try {
-                    const iframeDoc = iframe.contentDocument;
-                    iframeDoc.open();
-                    iframeDoc.write(document.documentElement.outerHTML);
-                    iframeDoc.close();
-                    
-                    // ビューポートmetaタグを設定
-                    const viewportMeta = iframeDoc.querySelector('meta[name="viewport"]') || 
-                                    iframeDoc.createElement('meta');
-                    viewportMeta.name = 'viewport';
-                    viewportMeta.content = `width=${targetWidth}, initial-scale=1.0`;
-                    if (!iframeDoc.querySelector('meta[name="viewport"]')) {
-                        iframeDoc.head.appendChild(viewportMeta);
-                    }
-                    
-                    // 少し待ってからチェック実行（CSSが適用されるまで）
-                    setTimeout(() => {
-                        const issues = performQualityChecksInIframe(iframeDoc, targetWidth);
-                        document.body.removeChild(iframe);
-                        resolve(issues);
-                    }, 500);
-                    
-                } catch (error) {
-                    document.body.removeChild(iframe);
-                    resolve([]);
-                }
-            };
-            
-            iframe.src = 'about:blank';
-        });
-    }
-
-    // iframe内でクオリティチェックを実行
-    function performQualityChecksInIframe(iframeDoc, viewportWidth) {
+        const currentViewport = window.innerWidth;
         const issues = [];
         
-        // 1. 画像チェック（iframe内）
-        const images = Array.from(iframeDoc.querySelectorAll('img'));
-        images.forEach((img, index) => {
-            const rect = img.getBoundingClientRect();
-            const naturalWidth = img.naturalWidth;
+        // 現在のビューポート幅でチェック
+        const currentIssues = performDetailedMobileCheck(currentViewport);
+        
+        return Promise.resolve({
+            currentViewport: currentViewport,
+            results: {
+                [`現在の画面 (${currentViewport}px)`]: {
+                    width: currentViewport,
+                    issues: currentIssues,
+                    isCurrentViewport: true
+                }
+            },
+            summary: generateQualitySummary({
+                'current': {
+                    width: currentViewport,
+                    issues: currentIssues,
+                    isCurrentViewport: true
+                }
+            }),
+            recommendedViewports: viewports,
+            instructions: '他の画面サイズでチェックする場合は、ブラウザのデベロッパーツール(F12)でデバイスエミュレーションを使用してください。'
+        });
+    }
+
+    // 詳細なモバイルチェック(実用的)
+    function performDetailedMobileCheck(viewportWidth) {
+        const issues = [];
+        
+        // 1. ページ全体の横スクロールチェック
+        const bodyWidth = document.body.scrollWidth;
+        const htmlWidth = document.documentElement.scrollWidth;
+        const maxWidth = Math.max(bodyWidth, htmlWidth);
+        
+        if (maxWidth > viewportWidth + 5) { // 5pxのマージン
+            issues.push({
+                type: 'ページ全体の横スクロール',
+                severity: 'HIGH',
+                element: 'body/html',
+                elementId: 'page-overflow',
+                details: `ページ全体の幅: ${maxWidth}px (ビューポート: ${viewportWidth}px)`,
+                recommendation: 'ページ全体に横スクロールが発生しています。overflow-x: hidden;または要素の幅調整が必要です。',
+                overflowAmount: maxWidth - viewportWidth
+            });
+        }
+        
+        // 2. 各要素の詳細チェック
+        const elementsToCheck = document.querySelectorAll('main *, body > *, .container, .content, article, section, div, img, table');
+        const checkedElements = new Set();
+        
+        elementsToCheck.forEach((element, index) => {
+            // 重複チェック防止
+            if (checkedElements.has(element)) return;
+            checkedElements.add(element);
             
-            // 非表示画像はスキップ
-            if (rect.width === 0 || rect.height === 0) return;
+            const rect = element.getBoundingClientRect();
+            const computedStyle = getComputedStyle(element);
             
-            // 画像が画面幅を超えている場合
-            if (rect.width > viewportWidth) {
-                const elementId = `iframe-img-${index}`;
+            // 非表示・サイズ0の要素はスキップ
+            if (rect.width === 0 || rect.height === 0 || 
+                computedStyle.display === 'none' || 
+                computedStyle.visibility === 'hidden') {
+                return;
+            }
+            
+            // 要素の実際の幅(スクロール含む)
+            const scrollWidth = element.scrollWidth;
+            const clientWidth = element.clientWidth;
+            
+            // 右はみ出しチェック(スクロール位置も考慮)
+            const rightEdge = rect.left + rect.width + window.scrollX;
+            const pageWidth = window.innerWidth + window.scrollX;
+            
+            if (rightEdge > pageWidth + 5) {
+                const elementId = element.id || `overflow-check-${index}`;
+                if (!element.id) element.id = elementId;
+                
+                const overflowAmount = Math.round(rightEdge - pageWidth);
                 
                 issues.push({
-                    type: '画像表示見切れ',
-                    severity: 'HIGH',
-                    element: getElementDescriptionFromIframe(img),
+                    type: '要素右はみ出し',
+                    severity: overflowAmount > 50 ? 'HIGH' : overflowAmount > 20 ? 'MEDIUM' : 'LOW',
+                    element: getElementDescription(element),
                     elementId: elementId,
-                    details: `${viewportWidth}px画面で表示幅: ${Math.round(rect.width)}px (${Math.round(rect.width - viewportWidth)}pxはみ出し)`,
-                    recommendation: 'max-width: 100% を設定してください',
-                    displayWidth: Math.round(rect.width),
+                    details: `要素が右に${overflowAmount}pxはみ出しています`,
+                    recommendation: 'max-width: 100%; または box-sizing: border-box; の設定を確認してください',
+                    overflowAmount: overflowAmount,
+                    elementWidth: Math.round(rect.width),
                     viewportWidth: viewportWidth
                 });
             }
             
-            // 画像の実サイズチェック
-            if (naturalWidth > viewportWidth * 2) {
+            // 固定幅チェック
+            const width = computedStyle.width;
+            const minWidth = computedStyle.minWidth;
+            
+            if (width && width.includes('px') && !width.includes('calc')) {
+                const widthPx = parseInt(width);
+                if (widthPx > viewportWidth * 0.95) {
+                    const elementId = element.id || `fixed-width-${index}`;
+                    if (!element.id) element.id = elementId;
+                    
+                    issues.push({
+                        type: '固定幅過大',
+                        severity: widthPx > viewportWidth ? 'HIGH' : 'MEDIUM',
+                        element: getElementDescription(element),
+                        elementId: elementId,
+                        details: `width: ${widthPx}px が設定されています (ビューポート: ${viewportWidth}px)`,
+                        recommendation: 'max-width: 100%; またはレスポンシブ単位(%, vw)の使用を検討',
+                        fixedWidth: widthPx,
+                        viewportWidth: viewportWidth
+                    });
+                }
+            }
+            
+            if (minWidth && minWidth.includes('px')) {
+                const minWidthPx = parseInt(minWidth);
+                if (minWidthPx > viewportWidth) {
+                    const elementId = element.id || `min-width-${index}`;
+                    if (!element.id) element.id = elementId;
+                    
+                    issues.push({
+                        type: '最小幅過大',
+                        severity: 'MEDIUM',
+                        element: getElementDescription(element),
+                        elementId: elementId,
+                        details: `min-width: ${minWidthPx}px が設定されています`,
+                        recommendation: 'スマホ用にmin-widthを調整するか、メディアクエリで制御',
+                        minWidth: minWidthPx,
+                        viewportWidth: viewportWidth
+                    });
+                }
+            }
+            
+            // 画像専用チェック
+            if (element.tagName === 'IMG') {
+                const naturalWidth = element.naturalWidth;
+                
+                if (naturalWidth > viewportWidth * 2) {
+                    const elementId = element.id || `img-size-${index}`;
+                    if (!element.id) element.id = elementId;
+                    
+                    issues.push({
+                        type: '画像サイズ過大',
+                        severity: naturalWidth > viewportWidth * 3 ? 'HIGH' : 'MEDIUM',
+                        element: getElementDescription(element),
+                        elementId: elementId,
+                        details: `画像実サイズ: ${naturalWidth}px (推奨: ${viewportWidth * 2}px以下)`,
+                        recommendation: '画像を最適化してファイルサイズを削減してください',
+                        actualWidth: naturalWidth,
+                        viewportWidth: viewportWidth
+                    });
+                }
+                
+                if (!element.hasAttribute('alt')) {
+                    const elementId = element.id || `img-alt-${index}`;
+                    if (!element.id) element.id = elementId;
+                    
+                    issues.push({
+                        type: 'ALTテキスト未設定',
+                        severity: 'LOW',
+                        element: getElementDescription(element),
+                        elementId: elementId,
+                        details: 'ALT属性が設定されていません',
+                        recommendation: 'アクセシビリティのためalt属性を設定してください'
+                    });
+                }
+            }
+        });
+        
+        // 3. フォントサイズチェック(最適化版)
+        const textElements = document.querySelectorAll('p, span, a, li, td, th, h1, h2, h3, h4, h5, h6, div');
+        const checkedTextElements = new Set();
+        
+        textElements.forEach((element, index) => {
+            if (checkedTextElements.has(element)) return;
+            
+            const text = element.textContent.trim();
+            if (!text || text.length === 0) return;
+            
+            // 直接のテキストノードがある場合のみチェック
+            const hasDirectText = Array.from(element.childNodes).some(node => 
+                node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0
+            );
+            
+            if (!hasDirectText) return;
+            
+            checkedTextElements.add(element);
+            
+            const computedStyle = getComputedStyle(element);
+            const fontSize = parseFloat(computedStyle.fontSize);
+            
+            if (fontSize < 14) {
+                const elementId = element.id || `font-size-${index}`;
+                if (!element.id) element.id = elementId;
+                
                 issues.push({
-                    type: '画像サイズ過大',
-                    severity: naturalWidth > viewportWidth * 3 ? 'HIGH' : 'MEDIUM',
-                    element: getElementDescriptionFromIframe(img),
-                    elementId: `iframe-img-size-${index}`,
-                    details: `画像実サイズ: ${naturalWidth}px (推奨: ${viewportWidth * 2}px以下)`,
-                    recommendation: '画像を最適化してファイルサイズを削減してください',
-                    actualWidth: naturalWidth,
-                    viewportWidth: viewportWidth
+                    type: '小さすぎるフォント',
+                    severity: fontSize < 12 ? 'HIGH' : 'MEDIUM',
+                    element: getElementDescription(element),
+                    elementId: elementId,
+                    details: `フォントサイズ: ${fontSize}px (推奨: 14px以上)`,
+                    recommendation: 'フォントサイズを14px以上に設定してください',
+                    fontSize: fontSize,
+                    textPreview: text.substring(0, 50) + (text.length > 50 ? '...' : '')
                 });
             }
         });
         
-        // 2. 要素見切れチェック（iframe内）
-        const elements = Array.from(iframeDoc.querySelectorAll('main *, .content *, article *, section *, div'));
-        elements.forEach((element, index) => {
+        // 4. タップ領域チェック
+        const tapElements = document.querySelectorAll('a, button, input[type="button"], input[type="submit"], [onclick]');
+        
+        tapElements.forEach((element, index) => {
             const rect = element.getBoundingClientRect();
-            const computedStyle = iframeDoc.defaultView.getComputedStyle(element);
+            const computedStyle = getComputedStyle(element);
             
-            // 非表示要素はスキップ
             if (rect.width === 0 || rect.height === 0 || computedStyle.display === 'none') {
                 return;
             }
             
-            // 要素が画面幅を超えている場合
-            if (rect.right > viewportWidth) {
-                const overflowAmount = Math.round(rect.right - viewportWidth);
+            const minTapSize = 44; // Apple/Google推奨
+            
+            if (rect.width < minTapSize || rect.height < minTapSize) {
+                const elementId = element.id || `tap-target-${index}`;
+                if (!element.id) element.id = elementId;
                 
                 issues.push({
-                    type: '要素見切れ',
-                    severity: overflowAmount > 50 ? 'HIGH' : overflowAmount > 20 ? 'MEDIUM' : 'LOW',
-                    element: getElementDescriptionFromIframe(element),
-                    elementId: `iframe-element-${index}`,
-                    details: `${viewportWidth}px画面ではみ出し: ${overflowAmount}px`,
-                    recommendation: 'レスポンシブデザインの調整が必要です',
-                    overflowAmount: overflowAmount,
-                    viewportWidth: viewportWidth
-                });
-            }
-        });
-        
-        // 3. フォントサイズチェック（iframe内）
-        elements.forEach((element, index) => {
-            const computedStyle = iframeDoc.defaultView.getComputedStyle(element);
-            const fontSize = parseFloat(computedStyle.fontSize);
-            const textContent = element.textContent.trim();
-            
-            // テキストがある要素のみチェック
-            if (!textContent || textContent.length === 0) return;
-            
-            // 子要素のテキストは除外
-            const hasTextChildren = Array.from(element.children).some(child => 
-                child.textContent.trim().length > 0
-            );
-            if (hasTextChildren && element.children.length > 0) return;
-            
-            if (fontSize <= 13) {
-                issues.push({
-                    type: '小さすぎるフォント',
-                    severity: fontSize <= 11 ? 'HIGH' : fontSize <= 12 ? 'MEDIUM' : 'LOW',
-                    element: getElementDescriptionFromIframe(element),
-                    elementId: `iframe-font-${index}`,
-                    details: `フォントサイズ: ${fontSize}px (推奨: 14px以上)`,
-                    recommendation: 'フォントサイズを14px以上に設定してください',
-                    fontSize: fontSize,
-                    textPreview: textContent.substring(0, 50) + (textContent.length > 50 ? '...' : '')
+                    type: 'タップ領域小',
+                    severity: (rect.width < 32 || rect.height < 32) ? 'HIGH' : 'MEDIUM',
+                    element: getElementDescription(element),
+                    elementId: elementId,
+                    details: `サイズ: ${Math.round(rect.width)}×${Math.round(rect.height)}px (推奨: 44×44px以上)`,
+                    recommendation: 'padding等でタップ領域を大きくしてください',
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height)
                 });
             }
         });
         
         return issues;
-    }
-
-    // iframe内要素の説明を生成
-    function getElementDescriptionFromIframe(element) {
-        let description = element.tagName.toLowerCase();
-        
-        if (element.className) {
-            description += `.${element.className.split(' ')[0]}`;
-        }
-        
-        if (element.id) {
-            description += `#${element.id}`;
-        }
-        
-        const text = element.textContent.trim();
-        if (text && text.length > 0) {
-            description += ` "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`;
-        }
-        
-        return description;
     }
 
     // 指定された画面幅でクオリティチェック
@@ -3504,78 +3548,99 @@
         // スマホクオリティチェック結果（新版）
         if (results.mobileQuality) {
             const summary = results.mobileQuality.summary;
+            const instructions = results.mobileQuality.instructions;
+            const recommendedViewports = results.mobileQuality.recommendedViewports;
             
             html += `
-                <h5 style="color: #e91e63; margin: 20px 0 10px 0; font-size: 14px;">📱 スマホクオリティチェック（新版）</h5>
+                <h5 style="color: #e91e63; margin: 20px 0 10px 0; font-size: 14px;">📱 スマホクオリティチェック</h5>
+                
+                <!-- 使用注意 -->
+                <div style="background: #e3f2fd; border-left: 4px solid #2196f3; padding: 12px; margin: 10px 0; border-radius: 4px; font-size: 12px;">
+                    <strong>💡 使用方法:</strong><br>
+                    ${instructions}<br><br>
+                    <strong>推奨テストサイズ:</strong><br>
+                    ${Object.entries(recommendedViewports).map(([name, width]) => 
+                        `${name}: ${width}px`
+                    ).join(' | ')}
+                </div>
                 
                 <!-- サマリー -->
                 <div style="background: #f8f9fa; border: 1px solid #ddd; padding: 12px; margin: 10px 0; border-radius: 5px; font-size: 12px;">
                     <strong>📊 全体サマリー:</strong><br>
                     総問題数: ${summary.totalIssues}件 
                     (🚨重要: ${summary.highSeverity}件, ⚠️中程度: ${summary.mediumSeverity}件, 💡軽微: ${summary.lowSeverity}件)<br>
-                    <strong>問題種別:</strong> ${Object.entries(summary.byType).map(([type, count]) => `${type}(${count}件)`).join(', ')}
+                    ${summary.totalIssues > 0 ? 
+                        `<strong>主な問題種別:</strong> ${Object.entries(summary.byType).map(([type, count]) => `${type}(${count}件)`).join(', ')}`
+                        : '✅ 問題は検出されませんでした！'}
                 </div>
                 
-                <!-- 各デバイス別結果 -->
+                <!-- 詳細結果 -->
                 ${Object.entries(results.mobileQuality.results).map(([deviceName, deviceResult]) => {
+                    if (deviceResult.issues.length === 0) {
+                        return `
+                            <div style="background: #e8f5e9; border: 1px solid #4caf50; padding: 15px; margin: 10px 0; border-radius: 5px; text-align: center;">
+                                ✅ ${deviceName}では問題は検出されませんでした
+                            </div>
+                        `;
+                    }
+                    
                     const highIssues = deviceResult.issues.filter(issue => issue.severity === 'HIGH');
-                    const currentIndicator = deviceResult.isCurrentViewport ? ' 📍現在の画面' : '';
                     
                     return `
-                        <div style="margin: 15px 0; border: 1px solid #ddd; border-radius: 5px; overflow: hidden;">
-                            <div style="background: ${deviceResult.isCurrentViewport ? '#e3f2fd' : '#f5f5f5'}; padding: 10px; border-bottom: 1px solid #ddd;">
-                                <strong>${deviceName} (${deviceResult.width}px)${currentIndicator}</strong>
-                                - 問題数: ${deviceResult.issues.length}件
+                        <div style="margin: 15px 0; border: 2px solid #e91e63; border-radius: 5px; overflow: hidden;">
+                            <div style="background: #fce4ec; padding: 12px; border-bottom: 1px solid #e91e63;">
+                                <strong style="font-size: 14px;">${deviceName}</strong>
+                                <span style="color: #666; font-size: 12px;"> - 問題数: ${deviceResult.issues.length}件</span>
                                 ${highIssues.length > 0 ? `
-                                <div style="margin-top: 5px;">
-                                    <strong>🚨 重要な問題:</strong>
-                                    ${highIssues.map((issue, index) => 
-                                        `<a href="#quality-issue-${deviceName}-${index}" style="color: #d32f2f; margin-right: 8px; text-decoration: underline; font-size: 13px;">
-                                            ${issue.type}
-                                        </a>`
-                                    ).join('')}
+                                <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #f8bbd0;">
+                                    <strong style="color: #d32f2f;">🚨 優先対応が必要な問題:</strong><br>
+                                    <div style="margin-top: 5px;">
+                                        ${highIssues.map((issue, index) => 
+                                            `<a href="#quality-issue-${index}" style="display: inline-block; background: #ffebee; color: #d32f2f; margin: 3px; padding: 4px 8px; text-decoration: none; border-radius: 3px; font-size: 12px;">
+                                                ${issue.type} →
+                                            </a>`
+                                        ).join('')}
+                                    </div>
                                 </div>
                                 ` : ''}
                             </div>
                             
-                            ${deviceResult.issues.length > 0 ? `
-                            <table style="${tableStyle};  margin: 0;">
+                            <table style="${tableStyle}; margin: 0;">
                                 <tr>
-                                    <th style="${headerStyle}; ">重要度</th>
-                                    <th style="${headerStyle}; ">問題種別</th>
-                                    <th style="${headerStyle}; ">要素</th>
-                                    <th style="${headerStyle}; ">詳細・推奨対応</th>
+                                    <th style="${headerStyle}; width: 80px;">重要度</th>
+                                    <th style="${headerStyle}; width: 120px;">種別</th>
+                                    <th style="${headerStyle};">詳細</th>
+                                    <th style="${headerStyle}; width: 80px;">要素</th>
                                 </tr>
                                 ${deviceResult.issues.map((issue, index) => {
                                     let severityColor = issue.severity === 'HIGH' ? '#d32f2f' : 
                                                     issue.severity === 'MEDIUM' ? '#f57c00' : '#689f38';
                                     let severityText = issue.severity === 'HIGH' ? '🚨 重要' : 
-                                                    issue.severity === 'MEDIUM' ? '⚠️ 中程度' : '💡 軽微';
+                                                    issue.severity === 'MEDIUM' ? '⚠️ 中' : '💡 低';
                                     
-                                    return `<tr id="quality-issue-${deviceName}-${index}">
-                                        <td style="${cellStyle}; color: ${severityColor}; font-weight: bold; ">
+                                    return `<tr id="quality-issue-${index}" style="background: ${issue.severity === 'HIGH' ? '#ffebee' : 'white'};">
+                                        <td style="${cellStyle}; color: ${severityColor}; font-weight: bold; text-align: center;">
                                             ${severityText}
                                         </td>
-                                        <td style="${cellStyle}; ">${issue.type}</td>
-                                        <td style="${cellStyle}; ">
-                                            <a href="#" onclick="highlightElement('${issue.elementId}'); return false;" 
-                                            style="color: #4285f4; text-decoration: underline; cursor: pointer;">
-                                                ${issue.element}
-                                            </a>
+                                        <td style="${cellStyle}; font-weight: bold; font-size: 12px;">
+                                            ${issue.type}
                                         </td>
-                                        <td style="${cellStyle}; ">
-                                            <strong>詳細:</strong> ${issue.details}<br>
-                                            <strong>推奨:</strong> ${issue.recommendation}
-                                            ${issue.textPreview ? `<br><strong>テキスト:</strong> "${issue.textPreview}"` : ''}
+                                        <td style="${cellStyle};">
+                                            <div style="margin-bottom: 6px;"><strong>🔍 詳細:</strong> ${issue.details}</div>
+                                            <div style="color: #0277bd; background: #e1f5fe; padding: 6px; border-radius: 3px; font-size: 12px;">
+                                                <strong>💡 推奨対応:</strong> ${issue.recommendation}
+                                            </div>
+                                            ${issue.textPreview ? `<div style="margin-top: 6px; font-size: 11px; color: #666;"><strong>テキスト:</strong> "${issue.textPreview}"</div>` : ''}
+                                        </td>
+                                        <td style="${cellStyle}; text-align: center;">
+                                            <a href="#" onclick="highlightElement('${issue.elementId}'); return false;" 
+                                            style="display: inline-block; background: #4285f4; color: white; padding: 6px 10px; text-decoration: none; border-radius: 4px; font-size: 11px;">
+                                                📍 表示
+                                            </a>
                                         </td>
                                     </tr>`;
                                 }).join('')}
                             </table>
-                            ` : `
-                            <div style="padding: 15px; color: #4caf50; text-align: center; font-size: 12px;">
-                                ✅ このデバイスサイズでは問題は検出されませんでした
-                            </div>
-                            `}
                         </div>
                     `;
                 }).join('')}
